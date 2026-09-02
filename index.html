@@ -188,6 +188,7 @@ function niceTicks(min, max, count){
 }
 
 function fmtNum(n, d=0){
+  if(n === null || n === undefined || Number.isNaN(n)) return '—';
   return n.toLocaleString('it-IT', {minimumFractionDigits:d, maximumFractionDigits:d});
 }
 
