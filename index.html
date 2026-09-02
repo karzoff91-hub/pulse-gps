@@ -1240,6 +1240,26 @@ function RosterPage({sessions, playerLabel}){
   );
 }
 
+/* Intercetta i crash di rendering e mostra l'errore reale invece di una
+   pagina vuota/nera senza spiegazioni. */
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error){ return { error }; }
+  componentDidCatch(error, info){ console.error('Errore nella pagina:', error, info); }
+  render(){
+    if(this.state.error){
+      return (
+        <div className="card" style={{borderColor:'var(--red)'}}>
+          <div className="card-title" style={{color:'var(--red)', marginBottom:8}}>Si è verificato un errore in questa pagina</div>
+          <div className="section-note" style={{color:'var(--text-hi)'}}>{String(this.state.error.message || this.state.error)}</div>
+          <div className="section-note">Prova a cambiare pagina e tornare indietro, oppure ricarica il sito.</div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function App(){
   const [page, setPage] = useState('overview');
   const [players, setPlayers] = useState([]);
@@ -1292,7 +1312,7 @@ function App(){
   return (
     <div className="app">
       <Sidebar page={page} setPage={setPage} players={players} selectedPlayerId={selectedPlayerId} onSelectPlayer={setSelectedPlayerId}/>
-      <div className="main">{content}</div>
+      <div className="main"><ErrorBoundary key={page}>{content}</ErrorBoundary></div>
     </div>
   );
 }
