@@ -66,7 +66,7 @@
   /* Main */
   .main{flex:1; min-width:0; padding:30px 40px 60px 40px;}
   .topbar{display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:26px; gap:20px; flex-wrap:wrap;}
-  .page-title{font-size:34px; line-height:1;}
+  .page-title{font-size:26px; line-height:1;}
   .page-sub{color:var(--text-lo); font-size:14.5px; margin-top:6px;}
 
   .controls{display:flex; gap:10px; flex-wrap:wrap;}
@@ -85,21 +85,21 @@
 
   .card{
     background:var(--pitch-050); border:1px solid var(--line); border-radius:10px;
-    padding:20px 22px;
+    padding:14px 16px;
   }
   .card-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;}
-  .card-title{font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-lo); font-weight:600;}
+  .card-title{font-size:11.5px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-lo); font-weight:600;}
 
-  .kpi-card .kpi-value{font-family:'Barlow Condensed'; font-size:40px; font-weight:700; line-height:1;}
-  .kpi-card .kpi-label{color:var(--text-lo); font-size:13.5px; margin-top:6px;}
+  .kpi-card .kpi-value{font-family:'Barlow Condensed'; font-size:26px; font-weight:700; line-height:1;}
+  .kpi-card .kpi-label{color:var(--text-lo); font-size:11.5px; margin-top:4px;}
   .kpi-card .kpi-delta{font-size:12.5px; margin-top:10px; display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:20px;}
   .kpi-up{background:rgba(166,226,46,0.12); color:var(--lime);}
   .kpi-down{background:rgba(225,91,78,0.12); color:var(--red);}
   .kpi-flat{background:rgba(143,160,145,0.12); color:var(--text-lo);}
 
-  table{width:100%; border-collapse:collapse; font-size:14px;}
-  th{text-align:left; color:var(--text-lo); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.05em; padding:9px 10px; border-bottom:1px solid var(--line);}
-  td{padding:11px 10px; border-bottom:1px solid var(--pitch-100);}
+  table{width:100%; border-collapse:collapse; font-size:12.5px;}
+  th{text-align:left; color:var(--text-lo); font-weight:600; font-size:10.5px; text-transform:uppercase; letter-spacing:0.05em; padding:6px 8px; border-bottom:1px solid var(--line);}
+  td{padding:7px 8px; border-bottom:1px solid var(--pitch-100);}
   tr:last-child td{border-bottom:none;}
   tbody tr:hover{background:var(--pitch-100);}
   .row-player{display:flex; align-items:center; gap:10px;}
@@ -166,7 +166,7 @@ const {useState, useMemo, useRef} = React;
    CHART PRIMITIVES — SVG puro, nessuna libreria esterna
    ================================================================= */
 
-const VB_W = 640, VB_H_DEFAULT = 280;
+const VB_W = 640, VB_H_DEFAULT = 200;
 const PAD = {top:14, right:16, bottom:28, left:44};
 
 function niceTicks(min, max, count){
@@ -339,16 +339,21 @@ function BarChart2({data, xKey, series, height=VB_H_DEFAULT, unit=''}){
 }
 
 /* Radar / spider chart, values expected 0-100 */
-function RadarChart({data, metricKey, series, height=320}){
+function RadarChart({data, metricKey, series, height=240, domainMin=0, domainMax=100, ringLabels}){
   const w = VB_W, h = height;
   const cx = w/2, cy = h/2 + 6;
-  const R = Math.min(w,h)/2 - 58;
+  const R = Math.min(w,h)/2 - 50;
   const N = data.length;
   const angle = (i) => -Math.PI/2 + i*(2*Math.PI/N);
-  const ringVals = [25,50,75,100];
+  const ringCount = 4;
+  const ringVals = Array.from({length:ringCount}, (_,i) => domainMin + ((i+1)/ringCount)*(domainMax-domainMin));
 
-  const pointFor = (i, val) => {
-    const r = (val/100)*R;
+  const toFrac = (val) => {
+    const clamped = Math.max(domainMin, Math.min(domainMax, val));
+    return (clamped - domainMin) / (domainMax - domainMin || 1);
+  };
+  const pointFor = (i, frac) => {
+    const r = frac*R;
     const a = angle(i);
     return [cx + r*Math.cos(a), cy + r*Math.sin(a)];
   };
@@ -357,23 +362,23 @@ function RadarChart({data, metricKey, series, height=320}){
     <div className="chart-wrap">
       <svg className="chart-svg" viewBox={`0 0 ${w} ${h}`}>
         {ringVals.map((rv,ri) => {
-          const pts = data.map((d,i) => pointFor(i, rv));
+          const pts = data.map((d,i) => pointFor(i, (ri+1)/ringCount));
           return <polygon key={ri} points={pts.map(p=>p.join(',')).join(' ')} fill="none" stroke="#2A3A2E" strokeWidth="1"/>;
         })}
         {data.map((d,i) => {
-          const [ex,ey] = pointFor(i, 100);
+          const [ex,ey] = pointFor(i, 1);
           return <line key={i} x1={cx} y1={cy} x2={ex} y2={ey} stroke="#2A3A2E" strokeWidth="1"/>;
         })}
         {data.map((d,i) => {
-          const [lx,ly] = pointFor(i, 118);
-          return <text key={'l'+i} x={lx} y={ly+4} fill="#8FA091" fontSize="11.5" textAnchor="middle">{d[metricKey]}</text>;
+          const [lx,ly] = pointFor(i, 1.16);
+          return <text key={'l'+i} x={lx} y={ly+4} fill="#8FA091" fontSize="10" textAnchor="middle">{d[metricKey]}</text>;
         })}
         {series.map(s => {
-          const pts = data.map((d,i) => pointFor(i, d[s.key]||0));
+          const pts = data.map((d,i) => pointFor(i, toFrac(d[s.key]||0)));
           return (
             <g key={s.key}>
               <polygon points={pts.map(p=>p.join(',')).join(' ')} fill={s.color} fillOpacity="0.16" stroke={s.color} strokeWidth="2"/>
-              {pts.map((p,i) => <circle key={i} cx={p[0]} cy={p[1]} r="2.6" fill={s.color}/>)}
+              {pts.map((p,i) => <circle key={i} cx={p[0]} cy={p[1]} r="2.4" fill={s.color}/>)}
             </g>
           );
         })}
@@ -710,13 +715,47 @@ const PEAK_METRICS = [
   {key:'pctHi', label:'% alta velocità', unit:'%', dec:1},
 ];
 
+function periodKeyFor(dateObj, period){
+  if(period==='month') return dateObj.getFullYear()+'-'+String(dateObj.getMonth()+1).padStart(2,'0');
+  if(period==='week'){
+    const d = new Date(dateObj);
+    const day = (d.getDay()+6)%7; // lunedì = 0
+    d.setDate(d.getDate()-day);
+    return d.toISOString().slice(0,10);
+  }
+  return dateObj.toISOString().slice(0,10);
+}
+function periodLabelFor(key, period){
+  if(period==='month'){
+    const [y,m] = key.split('-');
+    return new Date(Number(y), Number(m)-1, 1).toLocaleDateString('it-IT', {month:'short', year:'2-digit'});
+  }
+  if(period==='week') return 'Sett. ' + new Date(key).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit'});
+  return new Date(key).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit'});
+}
+
 function PanoramicaTab({sessions}){
+  const [period, setPeriod] = useState('day');
+  const [chartMetric, setChartMetric] = useState('distance');
   if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione disponibile.</div>;
   const last = sessions[sessions.length-1];
 
+  const cm = PEAK_METRICS.find(m=>m.key===chartMetric);
+  let chartData;
+  if(period === 'day'){
+    chartData = sessions.map(s => ({label:s.label, val:+((s[chartMetric]||0)).toFixed(cm.dec)}));
+  } else {
+    const groups = {};
+    sessions.forEach(s => {
+      const key = periodKeyFor(s.dateObj, period);
+      groups[key] = (groups[key]||0) + (s[chartMetric]||0);
+    });
+    chartData = Object.keys(groups).sort().map(key => ({label: periodLabelFor(key, period), val: +groups[key].toFixed(cm.dec)}));
+  }
+
   return (
     <div>
-      <div className="card" style={{marginBottom:16}}>
+      <div className="card" style={{marginBottom:14}}>
         <div className="card-head"><div className="card-title">Ultima sessione — {last.fullLabel} · {last.label}</div></div>
         <div className="grid grid-4">
           {PEAK_METRICS.map(m => {
@@ -725,10 +764,10 @@ function PanoramicaTab({sessions}){
             const pct = peak > 0 ? (value/peak)*100 : 0;
             return (
               <div key={m.key} className="card kpi-card">
-                <div className="kpi-value num">{fmt(value, m.dec)}<span style={{fontSize:16, color:'var(--text-lo)', marginLeft:4}}>{m.unit}</span></div>
+                <div className="kpi-value num">{fmt(value, m.dec)}<span style={{fontSize:13, color:'var(--text-lo)', marginLeft:3}}>{m.unit}</span></div>
                 <div className="kpi-label">{m.label}</div>
-                <div className="section-note">Picco personale: {fmt(peak, m.dec)} {m.unit}</div>
-                <span className={"badge " + pctBadgeClass(pct)} style={{marginTop:8, display:'inline-block'}}>{fmt(pct,0)}% del proprio picco</span>
+                <div className="section-note">Picco: {fmt(peak, m.dec)} {m.unit}</div>
+                <span className={"badge " + pctBadgeClass(pct)} style={{marginTop:6, display:'inline-block', fontSize:11}}>{fmt(pct,0)}% del picco</span>
               </div>
             );
           })}
@@ -736,9 +775,21 @@ function PanoramicaTab({sessions}){
       </div>
 
       <div className="card">
-        <div className="card-head"><div className="card-title">Distanza nel tempo</div></div>
-        <TrendChart data={sessions.map(s=>({label:s.label, distance:+(s.distance/1000).toFixed(2)}))} xKey="label" area unit="km"
-          series={[{key:'distance', name:'Distanza', color:'#A6E22E'}]}/>
+        <div className="card-head">
+          <div className="card-title">{cm.label} nel tempo</div>
+          <div className="controls">
+            <select value={chartMetric} onChange={e=>setChartMetric(e.target.value)} style={{fontSize:12}}>
+              {PEAK_METRICS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+            </select>
+            <select value={period} onChange={e=>setPeriod(e.target.value)} style={{fontSize:12}}>
+              <option value="day">Giorno per giorno</option>
+              <option value="week">Somma settimanale</option>
+              <option value="month">Somma mensile</option>
+            </select>
+          </div>
+        </div>
+        <TrendChart data={chartData} xKey="label" area unit={cm.unit}
+          series={[{key:'val', name:cm.label, color:'#A6E22E'}]}/>
       </div>
     </div>
   );
@@ -1237,14 +1288,9 @@ function ConfrontiPage(){
 
 /* ---------------- Confronto 1 vs 1 dettagliato (in stile K-Sport) ---------------- */
 
-const RADAR_METRICS = [
-  {key:'%AI', label:'%AI'},
-  {key:'%ED', label:'%ED'},
-  {key:'%D_MPHI', label:'%D_MPHI'},
-  {key:'%D_SHI', label:'%D_SHI'},
-  {key:'%D_AccHI', label:'%D_AccHI'},
-  {key:'%D_DecHI', label:'%D_DecHI'},
-];
+const RADAR_CANDIDATES = ['%AI','%ED','%D_MPHI','%D_SHI','%D_AccHI','%D_DecHI','D','Drel','EEE','Smax','D_SHI','D_AccHI','D_DecHI','D_MPHI','D_S4','D_S5','D_S6','D_S7'];
+const DEFAULT_RADAR_METRICS = ['%AI','%ED','%D_MPHI','%D_SHI','%D_AccHI','%D_DecHI'];
+
 const HI_BAR_METRICS = [
   {key:'%D_SHI', label:'%D_SHI'},
   {key:'%D_AccHI', label:'%D_AccHI'},
@@ -1285,6 +1331,24 @@ function formatDurationHMS(totalSeconds){
   return [h,m,sec].map(x=>String(x).padStart(2,'0')).join(':');
 }
 
+/* Media e deviazione standard di ogni metrica, calcolate sullo storico
+   combinato dei due giocatori selezionati — usate come riferimento per lo z-score. */
+function computeZStats(sessions1, sessions2, metricKeys){
+  const combined = [...(sessions1||[]), ...(sessions2||[])];
+  const stats = {};
+  metricKeys.forEach(k => {
+    const vals = combined.map(s=>s.raw[k]).filter(v=>typeof v==='number');
+    const mean = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
+    const variance = vals.length ? vals.reduce((a,b)=>a+Math.pow(b-mean,2),0)/vals.length : 0;
+    stats[k] = { mean, std: Math.sqrt(variance) };
+  });
+  return stats;
+}
+function zScore(value, stat){
+  if(!stat || !stat.std) return 0;
+  return (value - stat.mean) / stat.std;
+}
+
 function PlayerPickerColumn({label, players, playerName, setPlayerName, mode, setMode, sessions}){
   const options = [
     {value:'avg-training', label:'Avg - Full Training'},
@@ -1292,15 +1356,27 @@ function PlayerPickerColumn({label, players, playerName, setPlayerName, mode, se
     ...((sessions||[]).map(s => ({value:'session:'+s.sessionId, label: s.label+' — '+s.fullLabel}))),
   ];
   return (
-    <div style={{marginBottom:20}}>
-      <div className="card-title" style={{marginBottom:8}}>{label}</div>
-      <select value={playerName} onChange={e=>setPlayerName(e.target.value)} style={{width:'100%', marginBottom:8}}>
+    <div style={{marginBottom:16}}>
+      <div className="card-title" style={{marginBottom:6}}>{label}</div>
+      <select value={playerName} onChange={e=>setPlayerName(e.target.value)} style={{width:'100%', marginBottom:6, fontSize:12.5}}>
         <option value="">Seleziona giocatore…</option>
         {players.map(p => <option key={p.PlayerId} value={p.PlayerName}>{p.PlayerName}</option>)}
       </select>
-      <select value={mode} onChange={e=>setMode(e.target.value)} style={{width:'100%'}} disabled={!playerName}>
+      <select value={mode} onChange={e=>setMode(e.target.value)} style={{width:'100%', fontSize:12.5}} disabled={!playerName}>
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
+    </div>
+  );
+}
+
+/* Riga di dati allineata su 3 colonne fisse, per evitare lo sfasamento
+   che una <table> normale avrebbe con valori di lunghezza diversa. */
+function StatRow({v1, label, v2}){
+  return (
+    <div style={{display:'grid', gridTemplateColumns:'62px 1fr 62px', gap:6, alignItems:'center', padding:'4px 0', borderBottom:'1px solid var(--pitch-100)'}}>
+      <div className="num" style={{fontSize:12, textAlign:'right'}}>{v1}</div>
+      <div style={{color:'var(--text-lo)', fontSize:10.5, textAlign:'center'}}>{label}</div>
+      <div className="num" style={{fontSize:12, textAlign:'left'}}>{v2}</div>
     </div>
   );
 }
@@ -1317,11 +1393,11 @@ function UnoAUnoView(){
   const [mode2, setMode2] = useState('avg-training');
   const [sessions2, setSessions2] = useState(null);
 
+  const [radarMetrics, setRadarMetrics] = useState(DEFAULT_RADAR_METRICS);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
   React.useEffect(() => { loadPlayers().then(setPlayers).catch(e=>setError(e.message)); }, []);
-
   React.useEffect(() => { if(name1) loadPlayerSessions(name1.toLowerCase()).then(setSessions1).catch(e=>setError(e.message)); }, [name1]);
   React.useEffect(() => { if(name2) loadPlayerSessions(name2.toLowerCase()).then(setSessions2).catch(e=>setError(e.message)); }, [name2]);
 
@@ -1345,80 +1421,94 @@ function UnoAUnoView(){
     setLoading(false);
   };
 
+  const toggleRadarMetric = (key) => {
+    setRadarMetrics(sel => sel.includes(key) ? sel.filter(x=>x!==key) : [...sel, key]);
+  };
+
   if(error) return <ErrorState message={error}/>;
   if(players === null) return <LoadingState/>;
 
+  const zStats = result ? computeZStats(sessions1, sessions2, radarMetrics) : {};
+
   return (
-    <div className="grid grid-3">
+    <div style={{display:'grid', gridTemplateColumns:'240px 1fr 300px', gap:14, alignItems:'start'}}>
       <div className="card">
         <PlayerPickerColumn label="Giocatore 1" players={players} playerName={name1} setPlayerName={setName1} mode={mode1} setMode={setMode1} sessions={sessions1}/>
         <PlayerPickerColumn label="Giocatore 2" players={players} playerName={name2} setPlayerName={setName2} mode={mode2} setMode={setMode2} sessions={sessions2}/>
+
+        <div className="card-title" style={{marginBottom:6}}>Parametri nel radar (z-score)</div>
+        <div style={{display:'flex', flexWrap:'wrap', gap:5, marginBottom:14}}>
+          {RADAR_CANDIDATES.map(k => (
+            <button key={k} onClick={()=>toggleRadarMetric(k)}
+              style={{
+                fontSize:10.5, padding:'4px 8px', borderRadius:14, cursor:'pointer',
+                border:'1px solid var(--line)',
+                background: radarMetrics.includes(k) ? 'var(--pitch-200)' : 'var(--pitch-100)',
+                color: radarMetrics.includes(k) ? 'var(--lime)' : 'var(--text-lo)',
+              }}>{k}</button>
+          ))}
+        </div>
+
         <button onClick={handleConfronta} disabled={!name1 || !name2 || loading} className="pill-btn on" style={{width:'100%', cursor:'pointer'}}>
           {loading ? 'Confronto…' : 'Confronta'}
         </button>
       </div>
 
-      <div style={{gridColumn:'span 2'}}>
-        {!result ? <div className="empty-hint">Scegli due giocatori e clicca "Confronta".</div> : !result.p1 || !result.p2 ? (
-          <div className="empty-hint">Dati insufficienti per uno dei due giocatori nella modalità scelta.</div>
-        ) : (
-          <div className="grid grid-3">
-            <div className="card" style={{gridColumn:'span 2'}}>
-              <div className="card-head"><div className="card-title">Performance</div></div>
-              <RadarChart
-                data={RADAR_METRICS.map(rm => ({metric: rm.label, p1: result.p1[rm.key]||0, p2: result.p2[rm.key]||0}))}
-                metricKey="metric"
-                series={[{key:'p1', name:name1, color:'#4FD3B8'}, {key:'p2', name:name2, color:'#E8D53D'}]}
-              />
-              <ChartLegend series={[{key:'p1', name:name1, color:'#4FD3B8'}, {key:'p2', name:name2, color:'#E8D53D'}]}/>
+      {!result ? <div className="empty-hint" style={{gridColumn:'span 2'}}>Scegli due giocatori e clicca "Confronta".</div> : !result.p1 || !result.p2 ? (
+        <div className="empty-hint" style={{gridColumn:'span 2'}}>Dati insufficienti per uno dei due giocatori nella modalità scelta.</div>
+      ) : (
+        <React.Fragment>
+          <div>
+            <div className="card" style={{marginBottom:14}}>
+              <div className="card-head"><div className="card-title">Performance (z-score)</div></div>
+              {radarMetrics.length < 3 ? <div className="empty-hint">Seleziona almeno 3 parametri per il radar.</div> : (
+                <React.Fragment>
+                  <RadarChart
+                    height={200} domainMin={-3} domainMax={3}
+                    data={radarMetrics.map(k => ({
+                      metric: k,
+                      p1: zScore(result.p1[k]||0, zStats[k]),
+                      p2: zScore(result.p2[k]||0, zStats[k]),
+                    }))}
+                    metricKey="metric"
+                    series={[{key:'p1', name:name1, color:'#4FD3B8'}, {key:'p2', name:name2, color:'#E8D53D'}]}
+                  />
+                  <ChartLegend series={[{key:'p1', name:name1, color:'#4FD3B8'}, {key:'p2', name:name2, color:'#E8D53D'}]}/>
+                  <div className="section-note">Z-score calcolato sullo storico combinato dei due giocatori: 0 = media, ogni unità = una deviazione standard.</div>
+                </React.Fragment>
+              )}
+            </div>
 
-              <div className="card-head" style={{marginTop:20}}><div className="card-title">Alta intensità</div></div>
+            <div className="card">
+              <div className="card-head"><div className="card-title">Alta intensità</div></div>
               <BarChart2
+                height={170}
                 data={HI_BAR_METRICS.map(bm => ({label: bm.label, A: +(result.p1[bm.key]||0).toFixed(2), B: +(result.p2[bm.key]||0).toFixed(2)}))}
                 xKey="label" series={[{key:'A', name:name1, color:'#4FD3B8'}, {key:'B', name:name2, color:'#E8D53D'}]}
               />
               <ChartLegend series={[{key:'A', name:name1, color:'#4FD3B8'}, {key:'B', name:name2, color:'#E8D53D'}]}/>
             </div>
-
-            <div className="card">
-              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, textAlign:'center', marginBottom:14}}>
-                <div style={{fontWeight:700}}>{name1}</div>
-                <div style={{fontWeight:700}}>{name2}</div>
-              </div>
-              <div className="card-title" style={{marginBottom:8}}>Total Load</div>
-              <table>
-                <tbody>
-                  {TOTAL_LOAD_ROWS.map(r => (
-                    <tr key={r.key}>
-                      <td className="num">{fmt(result.p1[r.key]||0, r.dec)}</td>
-                      <td style={{color:'var(--text-lo)', fontSize:12, textAlign:'center'}}>{r.label}</td>
-                      <td className="num">{fmt(result.p2[r.key]||0, r.dec)}</td>
-                    </tr>
-                  ))}
-                  <tr>
-                    <td className="num">{formatDurationHMS(result.p1.T)}</td>
-                    <td style={{color:'var(--text-lo)', fontSize:12, textAlign:'center'}}>T</td>
-                    <td className="num">{formatDurationHMS(result.p2.T)}</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <div className="card-title" style={{margin:'16px 0 8px'}}>High Intensity</div>
-              <table>
-                <tbody>
-                  {HIGH_INTENSITY_ROWS.map(r => (
-                    <tr key={r.key}>
-                      <td className="num">{fmt(result.p1[r.key]||0, r.dec)}</td>
-                      <td style={{color:'var(--text-lo)', fontSize:12, textAlign:'center'}}>{r.label}</td>
-                      <td className="num">{fmt(result.p2[r.key]||0, r.dec)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </div>
-        )}
-      </div>
+
+          <div className="card">
+            <div style={{display:'grid', gridTemplateColumns:'62px 1fr 62px', gap:6, textAlign:'center', marginBottom:10}}>
+              <div style={{fontWeight:700, fontSize:12.5, textAlign:'right'}}>{name1}</div>
+              <div></div>
+              <div style={{fontWeight:700, fontSize:12.5, textAlign:'left'}}>{name2}</div>
+            </div>
+            <div className="card-title" style={{marginBottom:4}}>Total Load</div>
+            {TOTAL_LOAD_ROWS.map(r => (
+              <StatRow key={r.key} v1={fmt(result.p1[r.key]||0, r.dec)} label={r.label} v2={fmt(result.p2[r.key]||0, r.dec)}/>
+            ))}
+            <StatRow v1={formatDurationHMS(result.p1.T)} label="T" v2={formatDurationHMS(result.p2.T)}/>
+
+            <div className="card-title" style={{margin:'14px 0 4px'}}>High Intensity</div>
+            {HIGH_INTENSITY_ROWS.map(r => (
+              <StatRow key={r.key} v1={fmt(result.p1[r.key]||0, r.dec)} label={r.label} v2={fmt(result.p2[r.key]||0, r.dec)}/>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
     </div>
   );
 }
