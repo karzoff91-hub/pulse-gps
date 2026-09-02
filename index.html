@@ -398,8 +398,6 @@ function ChartLegend({series}){
    ================================================================= */
 
 const TEAM_ID = 46247;
-const PLAYER_FILTER = 'gironda';
-const PLAYER_LABEL = 'Gironda';
 const MAX_SESSIONS = 20; // quante sessioni recenti caricare
 
 // Drill che rappresentano una sessione "completa" (evitiamo di sommare
@@ -445,7 +443,14 @@ async function apiGet(path){
   return json;
 }
 
-async function loadGirondaSessions(){
+async function loadPlayers(){
+  const resp = await apiGet(`/api/players?teamID=${TEAM_ID}`);
+  const list = (resp.Data && resp.Data.Players) || [];
+  // "Team Average" non è un giocatore reale, lo escludiamo dal selettore
+  return list.filter(p => (p.PlayerName || '').toLowerCase() !== 'team average');
+}
+
+async function loadPlayerSessions(playerNameFilter){
   const sessionsResp = await apiGet(`/api/sessions?teamID=${TEAM_ID}`);
   const all = (sessionsResp.Records || []);
   const fullSessions = all.filter(s => isFullSession(s.Drill));
@@ -454,7 +459,7 @@ async function loadGirondaSessions(){
 
   const detailed = await Promise.all(recent.map(async (s) => {
     try{
-      const detail = await apiGet(`/api/session-data?sessionId=${s.Session_ID}&players=${PLAYER_FILTER}`);
+      const detail = await apiGet(`/api/session-data?sessionId=${s.Session_ID}&players=${encodeURIComponent(playerNameFilter)}`);
       const player = detail.Data && detail.Data.Players && detail.Data.Players[0];
       if(!player) return null;
       const p = paramsToObject(player.Data);
@@ -515,12 +520,13 @@ const fmt = (n, d=0) => (n||0).toLocaleString('it-IT', {minimumFractionDigits:d,
    UI
    ================================================================= */
 
-function Sidebar({page, setPage}){
+function Sidebar({page, setPage, players, selectedPlayerId, onSelectPlayer}){
   const items = [
     {id:'overview', label:'Panoramica'},
     {id:'compare-days', label:'Confronto Sessioni'},
     {id:'load', label:'Gestione Carico'},
     {id:'roster', label:'Storico & Parametri'},
+    {id:'manual', label:'Giocatori Manuali'},
   ];
   return (
     <div className="sidebar">
@@ -531,13 +537,23 @@ function Sidebar({page, setPage}){
           <div className="brand-sub">GPS Performance</div>
         </div>
       </div>
+
+      {players && players.length > 0 && (
+        <div style={{marginBottom:18}}>
+          <div style={{fontSize:11, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--text-lo)', marginBottom:6, padding:'0 4px'}}>Giocatore</div>
+          <select value={selectedPlayerId} onChange={e=>onSelectPlayer(e.target.value)} style={{width:'100%'}}>
+            {players.map(p => <option key={p.PlayerId} value={p.PlayerId}>{p.PlayerName}</option>)}
+          </select>
+        </div>
+      )}
+
       {items.map(it => (
         <button key={it.id} className={"nav-item" + (page===it.id ? " active":"")} onClick={()=>setPage(it.id)}>
           <span className="nav-dot"></span>{it.label}
         </button>
       ))}
       <div className="sidebar-foot">
-        Dati reali K-Sport — atleta {PLAYER_LABEL}.<br/>
+        Dati reali K-Sport.<br/>
         Il carico usa la distanza come proxy (Player Load non disponibile via API).
       </div>
     </div>
@@ -571,8 +587,8 @@ function ErrorState({message}){
   );
 }
 
-function OverviewPage({sessions}){
-  if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione trovata per {PLAYER_LABEL}.</div>;
+function OverviewPage({sessions, playerLabel}){
+  if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione trovata per {playerLabel}.</div>;
   const last = sessions[sessions.length-1];
   const acwrData = computeACWR(sessions);
   const lastAcwr = acwrData[acwrData.length-1];
@@ -583,7 +599,7 @@ function OverviewPage({sessions}){
     <div>
       <div className="topbar">
         <div>
-          <h1 className="page-title">Panoramica — {PLAYER_LABEL}</h1>
+          <h1 className="page-title">Panoramica — {playerLabel}</h1>
           <div className="page-sub">Sessione più recente: {last.fullLabel} · {last.label}</div>
         </div>
       </div>
@@ -636,7 +652,7 @@ function OverviewPage({sessions}){
   );
 }
 
-function CompareDaysPage({sessions}){
+function CompareDaysPage({sessions, playerLabel}){
   const [idxA, setIdxA] = useState(Math.max(0, sessions.length-8));
   const [idxB, setIdxB] = useState(sessions.length-1);
 
@@ -659,7 +675,7 @@ function CompareDaysPage({sessions}){
       <div className="topbar">
         <div>
           <h1 className="page-title">Confronto sessioni</h1>
-          <div className="page-sub">Confronta due sessioni di {PLAYER_LABEL}</div>
+          <div className="page-sub">Confronta due sessioni di {playerLabel}</div>
         </div>
         <div className="controls">
           <select value={idxA} onChange={e=>setIdxA(Number(e.target.value))}>
@@ -708,7 +724,7 @@ function CompareDaysPage({sessions}){
   );
 }
 
-function LoadPage({sessions}){
+function LoadPage({sessions, playerLabel}){
   if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione disponibile.</div>;
   const acwrData = computeACWR(sessions).map(d => ({...d, x: d.label}));
   const last = acwrData[acwrData.length-1];
@@ -723,7 +739,7 @@ function LoadPage({sessions}){
     <div>
       <div className="topbar">
         <div>
-          <h1 className="page-title">Gestione del carico — {PLAYER_LABEL}</h1>
+          <h1 className="page-title">Gestione del carico — {playerLabel}</h1>
           <div className="page-sub">ACWR calcolato sulla distanza per sessione (proxy di carico)</div>
         </div>
       </div>
@@ -758,7 +774,180 @@ function LoadPage({sessions}){
   );
 }
 
-function RosterPage({sessions}){
+/* =================================================================
+   GIOCATORI MANUALI — CRUD verso il database (non provengono da K-Sport)
+   ================================================================= */
+
+async function apiCall(path, options){
+  const res = await fetch(path, options);
+  const json = await res.json().catch(() => ({}));
+  if(!res.ok || json.error) throw new Error(json.error || ('Errore di rete (' + res.status + ')'));
+  return json;
+}
+
+const loadManualPlayers = () => apiCall('/api/manual-players').then(r => r.Players || []);
+const createManualPlayer = (data) => apiCall('/api/manual-players', {
+  method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
+});
+const deleteManualPlayer = (id) => apiCall(`/api/manual-players?id=${id}`, { method:'DELETE' });
+
+const loadManualStats = (playerId) => apiCall(`/api/manual-stats?playerId=${playerId}`).then(r => r.Stats || []);
+const addManualStat = (data) => apiCall('/api/manual-stats', {
+  method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
+});
+const deleteManualStat = (id) => apiCall(`/api/manual-stats?id=${id}`, { method:'DELETE' });
+
+function ManualPlayersPage(){
+  const [players, setPlayers] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [error, setError] = useState(null);
+
+  const [newName, setNewName] = useState('');
+  const [newPosition, setNewPosition] = useState('');
+  const [newNotes, setNewNotes] = useState('');
+
+  const [statName, setStatName] = useState('');
+  const [statValue, setStatValue] = useState('');
+  const [statSession, setStatSession] = useState('');
+  const [statDate, setStatDate] = useState('');
+
+  const refreshPlayers = () => loadManualPlayers().then(list => {
+    setPlayers(list);
+    if(!selectedId && list.length > 0) setSelectedId(list[0].id);
+  }).catch(e => setError(e.message));
+
+  React.useEffect(() => { refreshPlayers(); }, []);
+
+  React.useEffect(() => {
+    if(!selectedId) { setStats([]); return; }
+    setStats(null);
+    loadManualStats(selectedId).then(setStats).catch(e => setError(e.message));
+  }, [selectedId]);
+
+  const handleAddPlayer = async (e) => {
+    e.preventDefault();
+    if(!newName.trim()) return;
+    try{
+      const res = await createManualPlayer({ name:newName.trim(), position:newPosition.trim(), notes:newNotes.trim() });
+      setNewName(''); setNewPosition(''); setNewNotes('');
+      const list = await loadManualPlayers();
+      setPlayers(list);
+      setSelectedId(res.Player.id);
+    } catch(err){ setError(err.message); }
+  };
+
+  const handleDeletePlayer = async (id) => {
+    try{
+      await deleteManualPlayer(id);
+      const list = await loadManualPlayers();
+      setPlayers(list);
+      setSelectedId(list.length > 0 ? list[0].id : null);
+    } catch(err){ setError(err.message); }
+  };
+
+  const handleAddStat = async (e) => {
+    e.preventDefault();
+    if(!statName.trim() || !statValue.trim()) return;
+    try{
+      await addManualStat({ playerId:selectedId, statName:statName.trim(), statValue:statValue.trim(), sessionLabel:statSession.trim(), recordedDate: statDate || null });
+      setStatName(''); setStatValue(''); setStatSession(''); setStatDate('');
+      setStats(await loadManualStats(selectedId));
+    } catch(err){ setError(err.message); }
+  };
+
+  const handleDeleteStat = async (id) => {
+    try{
+      await deleteManualStat(id);
+      setStats(await loadManualStats(selectedId));
+    } catch(err){ setError(err.message); }
+  };
+
+  const selectedPlayer = players && players.find(p => p.id === selectedId);
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Giocatori manuali</h1>
+          <div className="page-sub">Atleti senza GPS K-Sport, con statistiche inserite a mano</div>
+        </div>
+      </div>
+
+      {error && <div className="card" style={{borderColor:'var(--red)', marginBottom:16}}><div className="section-note" style={{color:'var(--red)'}}>{error}</div></div>}
+
+      <div className="grid grid-3">
+        <div className="card">
+          <div className="card-head"><div className="card-title">Aggiungi giocatore</div></div>
+          <form onSubmit={handleAddPlayer} style={{display:'flex', flexDirection:'column', gap:10}}>
+            <input placeholder="Nome (obbligatorio)" value={newName} onChange={e=>setNewName(e.target.value)}
+              style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5}}/>
+            <input placeholder="Ruolo (opzionale)" value={newPosition} onChange={e=>setNewPosition(e.target.value)}
+              style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5}}/>
+            <input placeholder="Note (opzionale)" value={newNotes} onChange={e=>setNewNotes(e.target.value)}
+              style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5}}/>
+            <button type="submit" className="pill-btn on" style={{cursor:'pointer'}}>Aggiungi</button>
+          </form>
+
+          <div className="card-head" style={{marginTop:22}}><div className="card-title">Giocatori</div></div>
+          {players === null ? <div className="empty-hint">Caricamento…</div> :
+           players.length === 0 ? <div className="empty-hint">Nessun giocatore manuale ancora.</div> :
+           <div style={{display:'flex', flexDirection:'column', gap:6}}>
+             {players.map(p => (
+               <div key={p.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 10px', borderRadius:7, background: selectedId===p.id ? 'var(--pitch-200)' : 'transparent', cursor:'pointer'}} onClick={()=>setSelectedId(p.id)}>
+                 <div>
+                   <div style={{fontSize:14}}>{p.name}</div>
+                   {p.position && <div style={{fontSize:12, color:'var(--text-lo)'}}>{p.position}</div>}
+                 </div>
+                 <button onClick={(e)=>{e.stopPropagation(); handleDeletePlayer(p.id);}} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12}}>Elimina</button>
+               </div>
+             ))}
+           </div>
+          }
+        </div>
+
+        <div className="card">
+          <div className="card-head"><div className="card-title">{selectedPlayer ? `Statistiche — ${selectedPlayer.name}` : 'Statistiche'}</div></div>
+          {!selectedPlayer ? <div className="empty-hint">Seleziona o aggiungi un giocatore.</div> : (
+            <React.Fragment>
+              <form onSubmit={handleAddStat} style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:16}}>
+                <input placeholder="Nome statistica (es. Gol)" value={statName} onChange={e=>setStatName(e.target.value)}
+                  style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5, gridColumn:'1 / 3'}}/>
+                <input placeholder="Valore (es. 2)" value={statValue} onChange={e=>setStatValue(e.target.value)}
+                  style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5}}/>
+                <input placeholder="Sessione (opzionale)" value={statSession} onChange={e=>setStatSession(e.target.value)}
+                  style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5}}/>
+                <input type="date" value={statDate} onChange={e=>setStatDate(e.target.value)}
+                  style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5, gridColumn:'1 / 3'}}/>
+                <button type="submit" className="pill-btn on" style={{gridColumn:'1 / 3', cursor:'pointer'}}>Aggiungi statistica</button>
+              </form>
+
+              {stats === null ? <div className="empty-hint">Caricamento…</div> :
+               stats.length === 0 ? <div className="empty-hint">Nessuna statistica ancora per questo giocatore.</div> :
+               <table>
+                 <thead><tr><th>Statistica</th><th>Valore</th><th>Sessione</th><th>Data</th><th></th></tr></thead>
+                 <tbody>
+                   {stats.map(s => (
+                     <tr key={s.id}>
+                       <td>{s.stat_name}</td>
+                       <td className="num">{s.stat_value}</td>
+                       <td style={{color:'var(--text-lo)'}}>{s.session_label || '—'}</td>
+                       <td style={{color:'var(--text-lo)'}}>{s.recorded_date ? new Date(s.recorded_date).toLocaleDateString('it-IT') : '—'}</td>
+                       <td><button onClick={()=>handleDeleteStat(s.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12, cursor:'pointer'}}>✕</button></td>
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
+              }
+            </React.Fragment>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RosterPage({sessions, playerLabel}){
   const [idx, setIdx] = useState(sessions.length-1);
   if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione disponibile.</div>;
   const s = sessions[idx];
@@ -768,7 +957,7 @@ function RosterPage({sessions}){
     <div>
       <div className="topbar">
         <div>
-          <h1 className="page-title">Storico &amp; parametri — {PLAYER_LABEL}</h1>
+          <h1 className="page-title">Storico &amp; parametri — {playerLabel}</h1>
           <div className="page-sub">Tutti i parametri grezzi restituiti dall'API K-Sport per la sessione selezionata</div>
         </div>
         <div className="controls">
@@ -819,12 +1008,35 @@ function RosterPage({sessions}){
 
 function App(){
   const [page, setPage] = useState('overview');
+  const [players, setPlayers] = useState([]);
+  const [selectedPlayerId, setSelectedPlayerId] = useState(null);
   const [sessions, setSessions] = useState(null);
   const [error, setError] = useState(null);
 
+  // Carica la rosa una sola volta all'avvio
   React.useEffect(() => {
-    loadGirondaSessions().then(setSessions).catch(e => setError(e.message));
+    loadPlayers()
+      .then(list => {
+        setPlayers(list);
+        const gironda = list.find(p => (p.PlayerName||'').toLowerCase() === 'gironda');
+        setSelectedPlayerId(String((gironda || list[0]).PlayerId));
+      })
+      .catch(e => setError(e.message));
   }, []);
+
+  // Ricarica le sessioni ogni volta che cambia il giocatore selezionato
+  React.useEffect(() => {
+    if(!selectedPlayerId || players.length === 0) return;
+    const player = players.find(p => String(p.PlayerId) === String(selectedPlayerId));
+    if(!player) return;
+    setSessions(null);
+    loadPlayerSessions(player.PlayerName.toLowerCase())
+      .then(setSessions)
+      .catch(e => setError(e.message));
+  }, [selectedPlayerId, players]);
+
+  const selectedPlayer = players.find(p => String(p.PlayerId) === String(selectedPlayerId));
+  const playerLabel = selectedPlayer ? selectedPlayer.PlayerName : '';
 
   let content;
   if(error){
@@ -833,17 +1045,18 @@ function App(){
     content = <LoadingState/>;
   } else {
     const pages = {
-      overview: <OverviewPage sessions={sessions}/>,
-      'compare-days': <CompareDaysPage sessions={sessions}/>,
-      load: <LoadPage sessions={sessions}/>,
-      roster: <RosterPage sessions={sessions}/>,
+      overview: <OverviewPage sessions={sessions} playerLabel={playerLabel}/>,
+      'compare-days': <CompareDaysPage sessions={sessions} playerLabel={playerLabel}/>,
+      load: <LoadPage sessions={sessions} playerLabel={playerLabel}/>,
+      roster: <RosterPage sessions={sessions} playerLabel={playerLabel}/>,
+      manual: <ManualPlayersPage/>,
     };
     content = pages[page];
   }
 
   return (
     <div className="app">
-      <Sidebar page={page} setPage={setPage}/>
+      <Sidebar page={page} setPage={setPage} players={players} selectedPlayerId={selectedPlayerId} onSelectPlayer={setSelectedPlayerId}/>
       <div className="main">{content}</div>
     </div>
   );
