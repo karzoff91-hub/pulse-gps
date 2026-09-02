@@ -414,17 +414,29 @@ function isFullSession(drill){
 const PARAM_LABELS = {
   D: 'Distanza totale (m)',
   T: 'Durata (s)',
-  Drel: 'Distanza relativa (m/min)',
+  Drel: 'Distanza al minuto (m/min)',
+  EDRel: 'Distanza equivalente al minuto (m/min)',
+  EEE: 'Spesa energetica (kJ/kg) — indicatore di carico totale',
+  AMP: 'Potenza metabolica media (W/kg)',
+  '%ED': '% distanza equivalente',
+  '%AI': '% spesa anaerobica',
   Smax: 'Velocità massima (m/s)',
-  D_SHI: 'Distanza alta intensità (m)',
-  T_SHI: 'Tempo alta intensità (s)',
-  D_AccHI: 'Distanza in accelerazione alta intensità (m)',
-  D_DecHI: 'Distanza in decelerazione alta intensità (m)',
-  D_S4: 'Distanza zona 4 (m)',
-  D_S5: 'Distanza zona 5 (m)',
-  D_S6: 'Distanza zona 6 (m)',
-  D_S7: 'Distanza zona 7 (m)',
-  '%D_SHI': '% distanza alta intensità',
+  D_SHI: 'Distanza ad alta velocità (m)',
+  T_SHI: 'Tempo ad alta velocità (s)',
+  D_AccHI: 'Distanza ad alta accelerazione (m)',
+  D_DecHI: 'Distanza ad alta decelerazione (m)',
+  D_MPHI: 'Distanza ad alta potenza metabolica (m)',
+  T_MPHI: 'Tempo ad alta potenza metabolica (s)',
+  '%D_SHI': '% distanza ad alta velocità',
+  '%D_AccHI': '% distanza ad alta accelerazione',
+  '%D_DecHI': '% distanza ad alta decelerazione',
+  '%D_MPHI': '% distanza ad alta potenza metabolica',
+  D_S4: 'Distanza nella soglia di velocità 4 (m)',
+  D_S5: 'Distanza nella soglia di velocità 5 (m)',
+  D_S6: 'Distanza nella soglia di velocità 6 (m)',
+  D_S7: 'Distanza nella soglia di velocità 7 (m)',
+  T_MP1: 'Tempo nella soglia di potenza metabolica 1 (s)',
+  ND_MP1: 'N° ingressi nella soglia di potenza metabolica 1 (da soglia superiore)',
 };
 
 function paramsToObject(dataArray){
@@ -475,6 +487,7 @@ async function loadPlayerSessions(playerNameFilter){
         isMatch: /full match|partita|extra time/i.test(s.Drill),
         raw: p,
         distance,
+        eee: p.EEE || 0,
         durationSec,
         durationMin,
         maxSpeedMs: p.Smax || 0,
@@ -495,17 +508,67 @@ async function loadPlayerSessions(playerNameFilter){
   return detailed.filter(Boolean).sort((a,b) => a.dateUnix - b.dateUnix);
 }
 
-/* ACWR (rapporto carico acuto:cronico), usando la Distanza come proxy di
-   carico — K-Sport non espone un "Player Load" proprietario via API, quindi
-   la distanza totale per sessione è l'indicatore di carico più affidabile
-   disponibile qui. Le finestre sono calcolate per indice di sessione (non
-   per giorno di calendario), utile perché i dati hanno interruzioni stagionali. */
+/* Carica le sessioni di TUTTA la squadra insieme (senza filtro giocatore),
+   usata per il confronto tra più atleti e per il K-Compare. */
+const MAX_TEAM_SESSIONS = 16;
+
+async function loadTeamSessions(){
+  const sessionsResp = await apiGet(`/api/sessions?teamID=${TEAM_ID}`);
+  const all = (sessionsResp.Records || []);
+  const fullSessions = all.filter(s => isFullSession(s.Drill));
+  fullSessions.sort((a,b) => b.Date - a.Date);
+  const recent = fullSessions.slice(0, MAX_TEAM_SESSIONS);
+
+  const detailed = await Promise.all(recent.map(async (s) => {
+    try{
+      const detail = await apiGet(`/api/session-data?sessionId=${s.Session_ID}`);
+      const playersList = (detail.Data && detail.Data.Players) || [];
+      const players = {};
+      playersList.forEach(pl => {
+        if((pl.PlayerName||'').toLowerCase() === 'team average') return;
+        const p = paramsToObject(pl.Data);
+        const durationMin = (p.T || 0) / 60;
+        const distance = p.D || 0;
+        players[pl.PlayerName] = {
+          distance,
+          eee: p.EEE || 0,
+          maxSpeedKmh: (p.Smax || 0) * 3.6,
+          distPerMin: p.Drel || (durationMin > 0 ? distance / durationMin : 0),
+          pctHi: p['%D_SHI'] || 0,
+          hiDistance: p.D_SHI || 0,
+          accHiDistance: p.D_AccHI || 0,
+          decHiDistance: p.D_DecHI || 0,
+        };
+      });
+      return {
+        sessionId: s.Session_ID,
+        dateUnix: s.Date,
+        label: new Date(s.Date * 1000).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit', year:'2-digit'}),
+        fullLabel: s.Session,
+        drill: s.Drill,
+        isMatch: /full match|partita|extra time/i.test(s.Drill),
+        players,
+      };
+    } catch(e){
+      return null;
+    }
+  }));
+
+  return detailed.filter(Boolean).sort((a,b) => a.dateUnix - b.dateUnix);
+}
+
+/* ACWR (rapporto carico acuto:cronico), calcolato sulla Spesa Energetica (EEE,
+   kJ/kg) — nel manuale ufficiale K-Sport, EEE compare proprio nella sezione
+   "Total Load" del portale insieme a Distanza e Dist/min: è quindi il loro
+   indicatore di carico totale, più accurato della semplice distanza. Le
+   finestre sono calcolate per indice di sessione (non per giorno di
+   calendario), utile perché i dati hanno interruzioni stagionali. */
 function computeACWR(sessions){
   return sessions.map((s, i) => {
     const acuteWindow = sessions.slice(Math.max(0,i-6), i+1);
     const chronicWindow = sessions.slice(Math.max(0,i-27), i+1);
-    const acute = acuteWindow.reduce((a,x)=>a+x.distance,0) / acuteWindow.length;
-    const chronic = chronicWindow.reduce((a,x)=>a+x.distance,0) / chronicWindow.length;
+    const acute = acuteWindow.reduce((a,x)=>a+x.eee,0) / acuteWindow.length;
+    const chronic = chronicWindow.reduce((a,x)=>a+x.eee,0) / chronicWindow.length;
     const ratio = chronic > 0 ? +(acute/chronic).toFixed(2) : 0;
     let status = 'ok';
     if(ratio > 1.5) status = 'danger';
@@ -523,6 +586,7 @@ const fmt = (n, d=0) => (n||0).toLocaleString('it-IT', {minimumFractionDigits:d,
 function Sidebar({page, setPage, players, selectedPlayerId, onSelectPlayer}){
   const items = [
     {id:'overview', label:'Panoramica'},
+    {id:'team-compare', label:'Confronto Squadra'},
     {id:'compare-days', label:'Confronto Sessioni'},
     {id:'load', label:'Gestione Carico'},
     {id:'roster', label:'Storico & Parametri'},
@@ -554,7 +618,7 @@ function Sidebar({page, setPage, players, selectedPlayerId, onSelectPlayer}){
       ))}
       <div className="sidebar-foot">
         Dati reali K-Sport.<br/>
-        Il carico usa la distanza come proxy (Player Load non disponibile via API).
+        Il carico si basa sulla Spesa Energetica (EEE), indicatore ufficiale K-Sport.
       </div>
     </div>
   );
@@ -624,7 +688,7 @@ function OverviewPage({sessions, playerLabel}){
           <span className={"badge " + (lastAcwr.status==='ok'?'badge-ok':lastAcwr.status==='warn'?'badge-warn':'badge-danger')} style={{marginTop:8, display:'inline-block'}}>
             {lastAcwr.status==='ok'?'Ottimale':lastAcwr.status==='warn'?'Attenzione':'Rischio alto'}
           </span>
-          <div className="section-note">Zona ottimale 0.8–1.3. Calcolato su distanza come proxy di carico.</div>
+          <div className="section-note">Zona ottimale 0.8–1.3. Calcolato sulla Spesa Energetica (EEE, kJ/kg), l'indicatore di carico usato da K-Sport nel proprio portale.</div>
         </div>
       </div>
 
@@ -724,6 +788,176 @@ function CompareDaysPage({sessions, playerLabel}){
   );
 }
 
+/* =================================================================
+   CONFRONTO SQUADRA — classifica ordinabile, scostamenti %, K-Compare
+   ================================================================= */
+
+const TEAM_METRICS = {
+  distance: {label:'Distanza', unit:'m', dec:0},
+  eee: {label:'Spesa energetica (EEE)', unit:'kJ/kg', dec:1},
+  maxSpeedKmh: {label:'Velocità massima', unit:'km/h', dec:1},
+  distPerMin: {label:'Distanza/min', unit:'m/min', dec:1},
+  pctHi: {label:'% alta velocità', unit:'%', dec:1},
+  hiDistance: {label:'Distanza alta velocità', unit:'m', dec:0},
+  accHiDistance: {label:'Distanza acc. alta intensità', unit:'m', dec:0},
+  decHiDistance: {label:'Distanza dec. alta intensità', unit:'m', dec:0},
+};
+
+function pctBadgeClass(pct){
+  if(pct >= 110) return 'badge-ok';
+  if(pct >= 90) return 'badge-warn';
+  return 'badge-danger';
+}
+
+function TeamComparePage(){
+  const [teamSessions, setTeamSessions] = useState(null);
+  const [error, setError] = useState(null);
+  const [selectedPlayers, setSelectedPlayers] = useState([]);
+  const [metric, setMetric] = useState('distance');
+  const [sortDir, setSortDir] = useState('desc');
+  const [sessionIdx, setSessionIdx] = useState(null);
+  const [compareBase, setCompareBase] = useState('session'); // 'session' | 'match'
+
+  React.useEffect(() => {
+    loadTeamSessions()
+      .then(data => {
+        setTeamSessions(data);
+        const allNames = Array.from(new Set(data.flatMap(s => Object.keys(s.players))));
+        setSelectedPlayers(allNames.slice(0, 8));
+        setSessionIdx(data.length - 1);
+      })
+      .catch(e => setError(e.message));
+  }, []);
+
+  if(error) return <ErrorState message={error}/>;
+  if(teamSessions === null) return <LoadingState/>;
+  if(teamSessions.length === 0) return <div className="empty-hint">Nessuna sessione di squadra trovata.</div>;
+
+  const allPlayerNames = Array.from(new Set(teamSessions.flatMap(s => Object.keys(s.players)))).sort();
+  const m = TEAM_METRICS[metric];
+  const session = teamSessions[sessionIdx];
+
+  const togglePlayer = (name) => {
+    setSelectedPlayers(sel => sel.includes(name) ? sel.filter(x=>x!==name) : [...sel, name]);
+  };
+
+  // Riga per giocatore nella sessione selezionata, con scostamenti
+  const rows = selectedPlayers
+    .filter(name => session.players[name])
+    .map(name => {
+      const value = session.players[name][metric] || 0;
+
+      // Media del gruppo selezionato in questa sessione (per lo scostamento tra giocatori)
+      const groupVals = selectedPlayers.filter(n => session.players[n]).map(n => session.players[n][metric] || 0);
+      const groupAvg = groupVals.length ? groupVals.reduce((a,b)=>a+b,0)/groupVals.length : 0;
+      const pctVsGroup = groupAvg > 0 ? (value/groupAvg)*100 : 0;
+
+      // Picco storico personale (valore massimo mai registrato da questo giocatore per questo parametro)
+      const personalHistory = teamSessions
+        .filter(s => s.players[name])
+        .map(s => s.players[name][metric] || 0);
+      const personalPeak = personalHistory.length ? Math.max(...personalHistory) : 0;
+      const pctVsPeak = personalPeak > 0 ? (value/personalPeak)*100 : 0;
+
+      // K-Compare: media storica delle sessioni con lo stesso nome (Session-Compare)
+      // oppure media di tutte le partite (Match-Compare)
+      const baseline = teamSessions.filter(s => s.sessionId !== session.sessionId && s.players[name] && (
+        compareBase === 'match' ? s.isMatch : s.fullLabel === session.fullLabel
+      )).map(s => s.players[name][metric] || 0);
+      const baselineAvg = baseline.length ? baseline.reduce((a,b)=>a+b,0)/baseline.length : null;
+      const pctVsBaseline = (baselineAvg && baselineAvg > 0) ? (value/baselineAvg)*100 : null;
+
+      return { name, value, pctVsGroup, pctVsPeak, pctVsBaseline, hasBaseline: baseline.length > 0 };
+    });
+
+  rows.sort((a,b) => sortDir === 'desc' ? b.value - a.value : a.value - b.value);
+
+  // Serie storiche per il grafico di andamento
+  const trendData = teamSessions.map(s => {
+    const row = {label: s.label};
+    selectedPlayers.forEach(name => { row[name] = s.players[name] ? +(s.players[name][metric]||0).toFixed(m.dec) : null; });
+    return row;
+  });
+  const palette = ['#A6E22E','#5FA8D3','#E8A33D','#9B8CE8','#E15B4E','#4FD3B8','#E8D53D','#D35FA8'];
+  const trendSeries = selectedPlayers.map((name,i) => ({key:name, name, color: palette[i % palette.length]}));
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Confronto squadra</h1>
+          <div className="page-sub">Classifica, scostamenti % e andamento nel tempo tra più giocatori</div>
+        </div>
+        <div className="controls">
+          <select value={metric} onChange={e=>setMetric(e.target.value)}>
+            {Object.entries(TEAM_METRICS).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+          <select value={sessionIdx} onChange={e=>setSessionIdx(Number(e.target.value))}>
+            {teamSessions.map((s,i) => <option key={s.sessionId} value={i}>{s.label} — {s.fullLabel}</option>)}
+          </select>
+          <select value={compareBase} onChange={e=>setCompareBase(e.target.value)}>
+            <option value="session">K-Compare: stessa sessione (storico)</option>
+            <option value="match">K-Compare: modello partita</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="chip-row" style={{marginBottom:18}}>
+        {allPlayerNames.map(name => (
+          <button key={name} className={"chip" + (selectedPlayers.includes(name) ? " on":"")} onClick={()=>togglePlayer(name)}>
+            {name}
+          </button>
+        ))}
+      </div>
+
+      {selectedPlayers.length === 0 ? <div className="empty-hint">Seleziona almeno un giocatore.</div> : (
+      <React.Fragment>
+        <div className="card" style={{marginBottom:16}}>
+          <div className="card-head">
+            <div className="card-title">Classifica — {m.label} · {session.label} ({session.fullLabel})</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Giocatore</th>
+                <th style={{cursor:'pointer'}} onClick={()=>setSortDir(d => d==='desc'?'asc':'desc')}>
+                  {m.label} {sortDir==='desc' ? '▼' : '▲'}
+                </th>
+                <th>% vs media gruppo</th>
+                <th>% vs proprio picco</th>
+                <th>{compareBase==='match' ? 'K-Compare vs partite' : 'K-Compare vs storico sessione'}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.name}>
+                  <td>{r.name}</td>
+                  <td className="num">{fmt(r.value, m.dec)} {m.unit}</td>
+                  <td><span className={"badge " + pctBadgeClass(r.pctVsGroup)}>{fmt(r.pctVsGroup,0)}%</span></td>
+                  <td><span className={"badge " + pctBadgeClass(r.pctVsPeak)}>{fmt(r.pctVsPeak,0)}%</span></td>
+                  <td>{r.hasBaseline ? <span className={"badge " + pctBadgeClass(r.pctVsBaseline)}>{fmt(r.pctVsBaseline,0)}%</span> : <span style={{color:'var(--text-lo)', fontSize:12.5}}>storico insufficiente</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="section-note">
+            "% vs media gruppo" confronta ogni giocatore con la media dei giocatori selezionati in questa sessione.
+            "% vs proprio picco" confronta col valore massimo mai registrato dallo stesso giocatore in questo parametro (tra le ultime {MAX_TEAM_SESSIONS} sessioni caricate).
+            Verde ≥110%, giallo 90–110%, rosso &lt;90% (come nel portale K-Sport).
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head"><div className="card-title">{m.label} nel tempo</div></div>
+          <TrendChart data={trendData} xKey="label" unit={m.unit} series={trendSeries}/>
+          <ChartLegend series={trendSeries}/>
+        </div>
+      </React.Fragment>
+      )}
+    </div>
+  );
+}
+
 function LoadPage({sessions, playerLabel}){
   if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione disponibile.</div>;
   const acwrData = computeACWR(sessions).map(d => ({...d, x: d.label}));
@@ -740,7 +974,7 @@ function LoadPage({sessions, playerLabel}){
       <div className="topbar">
         <div>
           <h1 className="page-title">Gestione del carico — {playerLabel}</h1>
-          <div className="page-sub">ACWR calcolato sulla distanza per sessione (proxy di carico)</div>
+          <div className="page-sub">ACWR calcolato sulla Spesa Energetica (EEE) per sessione</div>
         </div>
       </div>
 
@@ -752,8 +986,8 @@ function LoadPage({sessions, playerLabel}){
             {last.status==='ok'?'Ottimale':last.status==='warn'?'Attenzione':'Rischio alto'}
           </span>
         </div>
-        <KPICard label="Carico acuto (ultime 7 sessioni)" value={fmt(last.acute)} unit="m"/>
-        <KPICard label="Carico cronico (ultime 28 sessioni)" value={fmt(last.chronic)} unit="m"/>
+        <KPICard label="Carico acuto (ultime 7 sessioni)" value={fmt(last.acute,1)} unit="kJ/kg"/>
+        <KPICard label="Carico cronico (ultime 28 sessioni)" value={fmt(last.chronic,1)} unit="kJ/kg"/>
         <KPICard label="Sessioni analizzate" value={sessions.length} unit=""/>
       </div>
 
@@ -1046,6 +1280,7 @@ function App(){
   } else {
     const pages = {
       overview: <OverviewPage sessions={sessions} playerLabel={playerLabel}/>,
+      'team-compare': <TeamComparePage/>,
       'compare-days': <CompareDaysPage sessions={sessions} playerLabel={playerLabel}/>,
       load: <LoadPage sessions={sessions} playerLabel={playerLabel}/>,
       roster: <RosterPage sessions={sessions} playerLabel={playerLabel}/>,
