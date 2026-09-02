@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pulse — GPS Performance Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+  :root{
+    --pitch-000:#0B120D;
+    --pitch-050:#0F1810;
+    --pitch-100:#141F16;
+    --pitch-200:#1C2A1F;
+    --line:#2A3A2E;
+    --text-hi:#EFF3EC;
+    --text-lo:#8FA091;
+    --lime:#A6E22E;
+    --lime-dim:#5C7A2E;
+    --amber:#E8A33D;
+    --red:#E15B4E;
+    --blue:#5FA8D3;
+    --violet:#9B8CE8;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{background:var(--pitch-000); color:var(--text-hi); font-family:'Barlow',sans-serif; height:100%;}
+  #root{min-height:100vh;}
+  ::selection{background:var(--lime); color:var(--pitch-000);}
+  h1,h2,h3,.display{font-family:'Barlow Condensed',sans-serif; font-weight:700; letter-spacing:0.2px;}
+  .num{font-variant-numeric: tabular-nums;}
+  button{font-family:inherit; cursor:pointer;}
+  a{color:inherit;}
+
+  .app{display:flex; min-height:100vh;}
+
+  /* Sidebar */
+  .sidebar{
+    width:230px; flex-shrink:0; background:var(--pitch-050);
+    border-right:1px solid var(--line); padding:28px 18px;
+    display:flex; flex-direction:column; gap:6px;
+    position:sticky; top:0; height:100vh;
+  }
+  .brand{display:flex; align-items:baseline; gap:8px; padding:0 10px 26px 10px; border-bottom:1px solid var(--line); margin-bottom:18px;}
+  .brand-mark{width:11px; height:11px; background:var(--lime); border-radius:2px; transform:rotate(45deg); flex-shrink:0;}
+  .brand-name{font-family:'Barlow Condensed'; font-weight:800; font-size:22px; letter-spacing:0.5px;}
+  .brand-sub{font-size:11px; color:var(--text-lo);}
+
+  .nav-item{
+    display:flex; align-items:center; gap:11px;
+    padding:11px 12px; border-radius:6px; color:var(--text-lo);
+    font-size:15px; font-weight:500; border:none; background:transparent; text-align:left; width:100%;
+    transition: background 0.15s, color 0.15s;
+  }
+  .nav-item:hover{background:var(--pitch-100); color:var(--text-hi);}
+  .nav-item.active{background:var(--pitch-200); color:var(--lime);}
+  .nav-dot{width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7; flex-shrink:0;}
+
+  .sidebar-foot{margin-top:auto; padding:14px 12px 0 12px; border-top:1px solid var(--line); font-size:12px; color:var(--text-lo); line-height:1.5;}
+
+  /* Mobile menu button */
+  .menu-btn{display:none;}
+
+  /* Main */
+  .main{flex:1; min-width:0; padding:30px 40px 60px 40px;}
+  .topbar{display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:26px; gap:20px; flex-wrap:wrap;}
+  .page-title{font-size:34px; line-height:1;}
+  .page-sub{color:var(--text-lo); font-size:14.5px; margin-top:6px;}
+
+  .controls{display:flex; gap:10px; flex-wrap:wrap;}
+  select, .pill-btn{
+    background:var(--pitch-100); border:1px solid var(--line); color:var(--text-hi);
+    padding:9px 14px; border-radius:7px; font-size:13.5px; font-weight:500;
+  }
+  select:focus{outline:1px solid var(--lime);}
+
+  /* Grid + cards */
+  .grid{display:grid; gap:16px;}
+  .grid-4{grid-template-columns:repeat(4,1fr);}
+  .grid-3{grid-template-columns:2fr 1fr;}
+  .grid-2{grid-template-columns:1fr 1fr;}
+  @media(max-width:1000px){ .grid-4{grid-template-columns:repeat(2,1fr);} .grid-3{grid-template-columns:1fr;} .grid-2{grid-template-columns:1fr;} }
+
+  .card{
+    background:var(--pitch-050); border:1px solid var(--line); border-radius:10px;
+    padding:20px 22px;
+  }
+  .card-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;}
+  .card-title{font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-lo); font-weight:600;}
+
+  .kpi-card .kpi-value{font-family:'Barlow Condensed'; font-size:40px; font-weight:700; line-height:1;}
+  .kpi-card .kpi-label{color:var(--text-lo); font-size:13.5px; margin-top:6px;}
+  .kpi-card .kpi-delta{font-size:12.5px; margin-top:10px; display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:20px;}
+  .kpi-up{background:rgba(166,226,46,0.12); color:var(--lime);}
+  .kpi-down{background:rgba(225,91,78,0.12); color:var(--red);}
+  .kpi-flat{background:rgba(143,160,145,0.12); color:var(--text-lo);}
+
+  table{width:100%; border-collapse:collapse; font-size:14px;}
+  th{text-align:left; color:var(--text-lo); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.05em; padding:9px 10px; border-bottom:1px solid var(--line);}
+  td{padding:11px 10px; border-bottom:1px solid var(--pitch-100);}
+  tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:var(--pitch-100);}
+  .row-player{display:flex; align-items:center; gap:10px;}
+  .avatar{width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; font-family:'Barlow Condensed'; color:var(--pitch-000); flex-shrink:0;}
+
+  .badge{padding:3px 9px; border-radius:20px; font-size:12px; font-weight:600; display:inline-block;}
+  .badge-ok{background:rgba(166,226,46,0.14); color:var(--lime);}
+  .badge-warn{background:rgba(232,163,61,0.16); color:var(--amber);}
+  .badge-danger{background:rgba(225,91,78,0.16); color:var(--red);}
+
+  .legend-row{display:flex; gap:16px; flex-wrap:wrap; margin-top:12px;}
+  .legend-item{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text-lo);}
+  .legend-swatch{width:10px; height:10px; border-radius:2px;}
+
+  .chip-row{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:4px;}
+  .chip{
+    padding:7px 13px; border-radius:20px; font-size:13px; font-weight:500;
+    border:1px solid var(--line); background:var(--pitch-100); color:var(--text-lo);
+  }
+  .chip.on{border-color: var(--player-color, var(--lime)); color:var(--text-hi); background:var(--pitch-200);}
+  .chip-swatch{width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:7px;}
+
+  .empty-hint{color:var(--text-lo); font-size:13.5px; padding:30px 0; text-align:center;}
+
+  .zone-bar-wrap{display:flex; flex-direction:column; gap:9px;}
+  .zone-row{display:grid; grid-template-columns:120px 1fr 60px; align-items:center; gap:10px; font-size:13px;}
+  .zone-track{height:9px; background:var(--pitch-100); border-radius:5px; overflow:hidden;}
+  .zone-fill{height:100%; border-radius:5px;}
+
+  .section-note{font-size:12.5px; color:var(--text-lo); line-height:1.6; margin-top:8px;}
+
+  /* Chart primitives */
+  .chart-wrap{position:relative; width:100%;}
+  .chart-svg{width:100%; height:auto; display:block; overflow:visible;}
+  .chart-tooltip{
+    position:absolute; pointer-events:none; background:var(--pitch-200); border:1px solid var(--line);
+    padding:9px 12px; border-radius:8px; font-size:12.5px; transform:translate(-50%,-108%);
+    white-space:nowrap; z-index:5; box-shadow:0 6px 18px rgba(0,0,0,0.35);
+  }
+  .chart-tooltip .t-label{color:var(--text-lo); margin-bottom:4px; font-size:11px; text-transform:uppercase; letter-spacing:0.05em;}
+  .chart-tooltip .t-row{display:flex; justify-content:space-between; gap:16px;}
+
+  ::-webkit-scrollbar{width:9px; height:9px;}
+  ::-webkit-scrollbar-track{background:var(--pitch-050);}
+  ::-webkit-scrollbar-thumb{background:var(--line); border-radius:5px;}
+</style>
+</head>
+<body>
+<div id="root"><div style="padding:40px;font-family:sans-serif;color:#8FA091;background:#0B120D;min-height:100vh;">Caricamento di Pulse in corso…</div></div>
+
+<script>
+  window.addEventListener('error', function(e){
+    var root = document.getElementById('root');
+    if(root && !root.dataset.mounted){
+      root.innerHTML = '<div style="padding:40px;font-family:sans-serif;color:#E15B4E;background:#0B120D;min-height:100vh;">Errore nel caricamento: ' + (e.message||'sconosciuto') + '. Prova a ricaricare la pagina o ad aprirla con un altro browser.</div>';
+    }
+  });
+</script>
+
+<script type="text/babel" data-presets="react,env">
+const {useState, useMemo, useRef} = React;
+
+/* =================================================================
+   CHART PRIMITIVES — SVG puro, nessuna libreria esterna
+   ================================================================= */
+
+const VB_W = 640, VB_H_DEFAULT = 280;
+const PAD = {top:14, right:16, bottom:28, left:44};
+
+function niceTicks(min, max, count){
+  if(min === max){ min -= 1; max += 1; }
+  const range = max - min;
+  const step = range / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(step)));
+  const norm = step / mag;
+  let niceStep;
+  if(norm < 1.5) niceStep = 1*mag;
+  else if(norm < 3) niceStep = 2*mag;
+  else if(norm < 7) niceStep = 5*mag;
+  else niceStep = 10*mag;
+  const niceMin = Math.floor(min/niceStep)*niceStep;
+  const niceMax = Math.ceil(max/niceStep)*niceStep;
+  const ticks = [];
+  for(let v=niceMin; v<=niceMax+1e-9; v+=niceStep) ticks.push(+v.toFixed(6));
+  return ticks;
+}
+
+function fmtNum(n, d=0){
+  return n.toLocaleString('it-IT', {minimumFractionDigits:d, maximumFractionDigits:d});
+}
+
+/* Multi-series line/area chart with hover tooltip, reference bands/lines */
+function TrendChart({data, xKey, series, height=VB_H_DEFAULT, area=false, unit='', yMin, yMax, refBands=[], refLines=[]}){
+  const wrapRef = useRef(null);
+  const [hover, setHover] = useState(null);
+  const w = VB_W, h = height;
+  const plotW = w - PAD.left - PAD.right;
+  const plotH = h - PAD.top - PAD.bottom;
+
+  const allVals = data.flatMap(d => series.map(s => d[s.key])).filter(v => typeof v === 'number');
+  const dataMin = allVals.length ? Math.min(...allVals) : 0;
+  const dataMax = allVals.length ? Math.max(...allVals) : 1;
+  const lo = yMin !== undefined ? yMin : Math.min(dataMin, 0);
+  const hi = yMax !== undefined ? yMax : dataMax;
+  const ticks = niceTicks(lo, hi, 4);
+  const yLo = ticks[0], yHi = ticks[ticks.length-1];
+
+  const n = data.length;
+  const xPos = (i) => n <= 1 ? PAD.left + plotW/2 : PAD.left + (i/(n-1))*plotW;
+  const yPos = (v) => PAD.top + plotH - ((v - yLo)/((yHi-yLo)||1))*plotH;
+
+  const labelEvery = Math.max(1, Math.ceil(n / 8));
+
+  const handleMove = (e) => {
+    const svg = e.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    const relX = (e.clientX - rect.left) / rect.width * w;
+    let idx = n<=1 ? 0 : Math.round(((relX - PAD.left)/plotW)*(n-1));
+    idx = Math.max(0, Math.min(n-1, idx));
+    setHover(idx);
+  };
+
+  return (
+    <div className="chart-wrap" ref={wrapRef}>
+      <svg className="chart-svg" viewBox={`0 0 ${w} ${h}`} onMouseMove={handleMove} onMouseLeave={()=>setHover(null)}>
+        {ticks.map((t,i) => (
+          <g key={i}>
+            <line x1={PAD.left} x2={w-PAD.right} y1={yPos(t)} y2={yPos(t)} stroke="#1C2A1F" strokeWidth="1"/>
+            <text x={PAD.left-8} y={yPos(t)+4} fill="#8FA091" fontSize="11" textAnchor="end">{fmtNum(t)}</text>
+          </g>
+        ))}
+        {refBands.map((b,i) => (
+          <rect key={'b'+i} x={PAD.left} y={yPos(b.y2)} width={plotW} height={Math.max(0,yPos(b.y1)-yPos(b.y2))} fill={b.color||'#A6E22E'} opacity={b.opacity||0.08}/>
+        ))}
+        {refLines.map((r,i) => (
+          <g key={'r'+i}>
+            <line x1={PAD.left} x2={w-PAD.right} y1={yPos(r.y)} y2={yPos(r.y)} stroke={r.color||'#E15B4E'} strokeWidth="1.4" strokeDasharray="5 4"/>
+            {r.label && <text x={w-PAD.right} y={yPos(r.y)-5} fill={r.color||'#E15B4E'} fontSize="10.5" textAnchor="end">{r.label}</text>}
+          </g>
+        ))}
+        {data.map((d,i) => (i % labelEvery === 0 || i === n-1) && (
+          <text key={'x'+i} x={xPos(i)} y={h-8} fill="#8FA091" fontSize="10.5" textAnchor="middle">{d[xKey]}</text>
+        ))}
+        {series.map(s => {
+          const pts = data.map((d,i) => [xPos(i), yPos(d[s.key])]);
+          const linePath = pts.map((p,i) => (i===0?'M':'L')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+          const areaPath = area ? linePath + ` L${pts[pts.length-1][0].toFixed(1)},${yPos(yLo).toFixed(1)} L${pts[0][0].toFixed(1)},${yPos(yLo).toFixed(1)} Z` : null;
+          const gid = 'grad-'+s.key.replace(/[^a-zA-Z0-9]/g,'');
+          return (
+            <g key={s.key}>
+              {area && <defs>
+                <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={s.color} stopOpacity="0.32"/>
+                  <stop offset="100%" stopColor={s.color} stopOpacity="0"/>
+                </linearGradient>
+              </defs>}
+              {area && <path d={areaPath} fill={`url(#${gid})`} stroke="none"/>}
+              <path d={linePath} fill="none" stroke={s.color} strokeWidth="2.3" strokeLinejoin="round" strokeLinecap="round"/>
+              {n <= 30 && pts.map((p,i) => <circle key={i} cx={p[0]} cy={p[1]} r="2.6" fill={s.color}/>)}
+            </g>
+          );
+        })}
+        {hover !== null && (
+          <line x1={xPos(hover)} x2={xPos(hover)} y1={PAD.top} y2={h-PAD.bottom} stroke="#8FA091" strokeWidth="1" strokeDasharray="3 3"/>
+        )}
+      </svg>
+      {hover !== null && (
+        <div className="chart-tooltip" style={{left: (xPos(hover)/w*100)+'%', top: (PAD.top/h*100)+'%'}}>
+          <div className="t-label">{data[hover][xKey]}</div>
+          {series.map(s => (
+            <div className="t-row" key={s.key}>
+              <span style={{color:s.color}}>{s.name}</span>
+              <span className="num">&nbsp;{fmtNum(data[hover][s.key], unit==='km'?1:0)} {unit}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Grouped bar chart, 2 series */
+function BarChart2({data, xKey, series, height=VB_H_DEFAULT, unit=''}){
+  const [hover, setHover] = useState(null);
+  const w = VB_W, h = height;
+  const plotW = w - PAD.left - PAD.right;
+  const plotH = h - PAD.top - PAD.bottom;
+  const allVals = data.flatMap(d => series.map(s => d[s.key]));
+  const maxV = Math.max(...allVals, 1);
+  const ticks = niceTicks(0, maxV, 4);
+  const yHi = ticks[ticks.length-1];
+  const yPos = (v) => PAD.top + plotH - (v/(yHi||1))*plotH;
+
+  const n = data.length;
+  const groupW = plotW / n;
+  const barW = Math.min(26, groupW*0.32);
+  const gap = 6;
+
+  return (
+    <div className="chart-wrap">
+      <svg className="chart-svg" viewBox={`0 0 ${w} ${h}`}>
+        {ticks.map((t,i) => (
+          <g key={i}>
+            <line x1={PAD.left} x2={w-PAD.right} y1={yPos(t)} y2={yPos(t)} stroke="#1C2A1F" strokeWidth="1"/>
+            <text x={PAD.left-8} y={yPos(t)+4} fill="#8FA091" fontSize="11" textAnchor="end">{fmtNum(t)}</text>
+          </g>
+        ))}
+        {data.map((d,i) => {
+          const cx = PAD.left + groupW*i + groupW/2;
+          return (
+            <g key={i} onMouseEnter={()=>setHover(i)} onMouseLeave={()=>setHover(null)}>
+              <rect x={cx-groupW/2} y={PAD.top} width={groupW} height={plotH} fill="transparent"/>
+              {series.map((s,si) => {
+                const bx = cx - barW - gap/2 + si*(barW+gap);
+                const bh = plotH - (yPos(d[s.key]) - PAD.top);
+                return <rect key={s.key} x={bx} y={yPos(d[s.key])} width={barW} height={Math.max(0,bh)} fill={s.color} opacity={hover===i?1:0.88} rx="3"/>;
+              })}
+              <text x={cx} y={h-8} fill="#8FA091" fontSize="10.5" textAnchor="middle">{d[xKey]}</text>
+            </g>
+          );
+        })}
+      </svg>
+      {hover !== null && (
+        <div className="chart-tooltip" style={{left: ((PAD.left + (VB_W-PAD.left-PAD.right)/data.length*(hover+0.5))/w*100)+'%', top: (PAD.top/h*100)+'%'}}>
+          <div className="t-label">{data[hover][xKey]}</div>
+          {series.map(s => (
+            <div className="t-row" key={s.key}>
+              <span style={{color:s.color}}>{s.name}</span>
+              <span className="num">&nbsp;{fmtNum(data[hover][s.key])} {unit}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Radar / spider chart, values expected 0-100 */
+function RadarChart({data, metricKey, series, height=320}){
+  const w = VB_W, h = height;
+  const cx = w/2, cy = h/2 + 6;
+  const R = Math.min(w,h)/2 - 58;
+  const N = data.length;
+  const angle = (i) => -Math.PI/2 + i*(2*Math.PI/N);
+  const ringVals = [25,50,75,100];
+
+  const pointFor = (i, val) => {
+    const r = (val/100)*R;
+    const a = angle(i);
+    return [cx + r*Math.cos(a), cy + r*Math.sin(a)];
+  };
+
+  return (
+    <div className="chart-wrap">
+      <svg className="chart-svg" viewBox={`0 0 ${w} ${h}`}>
+        {ringVals.map((rv,ri) => {
+          const pts = data.map((d,i) => pointFor(i, rv));
+          return <polygon key={ri} points={pts.map(p=>p.join(',')).join(' ')} fill="none" stroke="#2A3A2E" strokeWidth="1"/>;
+        })}
+        {data.map((d,i) => {
+          const [ex,ey] = pointFor(i, 100);
+          return <line key={i} x1={cx} y1={cy} x2={ex} y2={ey} stroke="#2A3A2E" strokeWidth="1"/>;
+        })}
+        {data.map((d,i) => {
+          const [lx,ly] = pointFor(i, 118);
+          return <text key={'l'+i} x={lx} y={ly+4} fill="#8FA091" fontSize="11.5" textAnchor="middle">{d[metricKey]}</text>;
+        })}
+        {series.map(s => {
+          const pts = data.map((d,i) => pointFor(i, d[s.key]||0));
+          return (
+            <g key={s.key}>
+              <polygon points={pts.map(p=>p.join(',')).join(' ')} fill={s.color} fillOpacity="0.16" stroke={s.color} strokeWidth="2"/>
+              {pts.map((p,i) => <circle key={i} cx={p[0]} cy={p[1]} r="2.6" fill={s.color}/>)}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function ChartLegend({series}){
+  return (
+    <div className="legend-row">
+      {series.map(s => (
+        <div className="legend-item" key={s.key || s.name}>
+          <span className="legend-swatch" style={{background:s.color}}></span>{s.name}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* =================================================================
+   DATI SIMULATI — sostituibili con chiamate alle API GPS reali
+   ================================================================= */
+
+const PLAYERS = [
+  {id:'p1', name:'Marco Rossi', number:7, role:'Attaccante', color:'#A6E22E'},
+  {id:'p2', name:'Luca Bianchi', number:4, role:'Difensore', color:'#5FA8D3'},
+  {id:'p3', name:'Davide Conti', number:8, role:'Centrocampista', color:'#E8A33D'},
+  {id:'p4', name:'Simone Ferri', number:11, role:'Ala', color:'#9B8CE8'},
+  {id:'p5', name:'Andrea Greco', number:5, role:'Difensore', color:'#E15B4E'},
+  {id:'p6', name:'Nicolò Fabbri', number:6, role:'Centrocampista', color:'#4FD3B8'},
+];
+
+function seedRandom(seed){
+  let s = seed % 2147483647;
+  if (s <= 0) s += 2147483646;
+  return function(){
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+function genDays(n){
+  const days = [];
+  const today = new Date(2026, 8, 2);
+  for(let i=n-1;i>=0;i--){
+    const d = new Date(today);
+    d.setDate(d.getDate()-i);
+    const isMatch = d.getDay() === 0;
+    days.push({
+      date: d.toISOString().slice(0,10),
+      label: d.toLocaleDateString('it-IT', {weekday:'short', day:'2-digit', month:'2-digit'}),
+      type: isMatch ? 'Partita' : (d.getDay() === 3 ? 'Riposo' : 'Allenamento')
+    });
+  }
+  return days;
+}
+
+const DAYS = genDays(21);
+
+const SESSIONS = {};
+PLAYERS.forEach((p, pi) => {
+  const rnd = seedRandom(1000 + pi*77);
+  SESSIONS[p.id] = DAYS.map((day, di) => {
+    if(day.type === 'Riposo'){
+      return {...day, playerId:p.id, distance:0, distancePerMin:0, maxSpeed:0, sprints:0, accels:0, decels:0,
+        playerLoad:0, duration:0, hrAvgPct:0,
+        zoneSpeed:{z1:0,z2:0,z3:0,z4:0,z5:0}};
+    }
+    const isMatch = day.type === 'Partita';
+    const base = isMatch ? 1.35 : 1.0;
+    const duration = isMatch ? 90 + Math.round(rnd()*8) : 70 + Math.round(rnd()*35);
+    const distance = Math.round((5200 + rnd()*3600) * base * (duration/90));
+    const maxSpeed = +(26 + rnd()*8 + (isMatch?1.5:0)).toFixed(1);
+    const sprints = Math.round((10 + rnd()*18) * base);
+    const accels = Math.round((18 + rnd()*22) * base);
+    const decels = Math.round((16 + rnd()*20) * base);
+    const playerLoad = Math.round((320 + rnd()*220) * base * (duration/90));
+    const distancePerMin = +(distance/duration).toFixed(1);
+    const hrAvgPct = Math.round((72 + rnd()*18) * (isMatch?1.05:1));
+    const z5 = Math.round(distance * (0.03 + rnd()*0.05) * base);
+    const z4 = Math.round(distance * (0.08 + rnd()*0.06) * base);
+    const z3 = Math.round(distance * (0.18 + rnd()*0.07));
+    const z2 = Math.round(distance * (0.28 + rnd()*0.06));
+    const z1 = Math.max(0, distance - z2 - z3 - z4 - z5);
+    return {
+      ...day, playerId:p.id, distance, distancePerMin, maxSpeed, sprints, accels, decels,
+      playerLoad, duration, hrAvgPct,
+      zoneSpeed:{z1,z2,z3,z4,z5}
+    };
+  });
+});
+
+function computeACWR(playerId){
+  const sessions = SESSIONS[playerId];
+  return sessions.map((s, i) => {
+    const acuteWindow = sessions.slice(Math.max(0,i-6), i+1);
+    const chronicWindow = sessions.slice(Math.max(0,i-27), i+1);
+    const acute = acuteWindow.reduce((a,x)=>a+x.playerLoad,0) / acuteWindow.length;
+    const chronic = chronicWindow.reduce((a,x)=>a+x.playerLoad,0) / chronicWindow.length;
+    const ratio = chronic > 0 ? +(acute/chronic).toFixed(2) : 0;
+    let status = 'ok';
+    if(ratio > 1.5) status = 'danger';
+    else if(ratio > 1.3 || ratio < 0.8) status = 'warn';
+    return {...s, acute:Math.round(acute), chronic:Math.round(chronic), acwr:ratio, status};
+  });
+}
+
+const fmt = (n, d=0) => n.toLocaleString('it-IT', {minimumFractionDigits:d, maximumFractionDigits:d});
+
+/* =================================================================
+   UI
+   ================================================================= */
+
+function Sidebar({page, setPage}){
+  const items = [
+    {id:'overview', label:'Panoramica'},
+    {id:'compare-players', label:'Confronto Giocatori'},
+    {id:'compare-days', label:'Confronto Giorni'},
+    {id:'load', label:'Gestione Carico'},
+    {id:'roster', label:'Rosa & Sessioni'},
+  ];
+  return (
+    <div className="sidebar">
+      <div className="brand">
+        <div className="brand-mark"></div>
+        <div>
+          <div className="brand-name">PULSE</div>
+          <div className="brand-sub">GPS Performance</div>
+        </div>
+      </div>
+      {items.map(it => (
+        <button key={it.id} className={"nav-item" + (page===it.id ? " active":"")} onClick={()=>setPage(it.id)}>
+          <span className="nav-dot"></span>{it.label}
+        </button>
+      ))}
+      <div className="sidebar-foot">
+        Dati simulati per prototipo.<br/>Collega gli endpoint API reali per dati live.
+      </div>
+    </div>
+  );
+}
+
+function KPICard({label, value, unit, delta, deltaLabel, deltaDir}){
+  return (
+    <div className="card kpi-card">
+      <div className="kpi-value num">{value}<span style={{fontSize:18, color:'var(--text-lo)', marginLeft:4}}>{unit}</span></div>
+      <div className="kpi-label">{label}</div>
+      {delta !== undefined &&
+        <span className={"kpi-delta " + (deltaDir==='up'?'kpi-up':deltaDir==='down'?'kpi-down':'kpi-flat')}>
+          {deltaDir==='up'?'▲':deltaDir==='down'?'▼':'—'} {delta} {deltaLabel}
+        </span>
+      }
+    </div>
+  );
+}
+
+function OverviewPage(){
+  const teamDay = DAYS[DAYS.length-1].date;
+  const dayIdx = DAYS.findIndex(d=>d.date===teamDay);
+  const todaySessions = PLAYERS.map(p => SESSIONS[p.id][dayIdx]).filter(s=>s.duration>0);
+  const totalDistance = todaySessions.reduce((a,s)=>a+s.distance,0);
+  const avgLoad = todaySessions.length ? Math.round(todaySessions.reduce((a,s)=>a+s.playerLoad,0)/todaySessions.length) : 0;
+  const maxSpeedToday = todaySessions.length ? Math.max(...todaySessions.map(s=>s.maxSpeed)) : 0;
+  const avgDistPerMin = todaySessions.length ? +(todaySessions.reduce((a,s)=>a+s.distancePerMin,0)/todaySessions.length).toFixed(1) : 0;
+
+  const teamTrend = DAYS.map(day => {
+    const sessions = PLAYERS.map(p => SESSIONS[p.id].find(s=>s.date===day.date));
+    const active = sessions.filter(s=>s.duration>0);
+    return {
+      label: day.label,
+      avgLoad: active.length ? Math.round(active.reduce((a,s)=>a+s.playerLoad,0)/active.length) : 0,
+    };
+  });
+
+  const riskCount = PLAYERS.filter(p => {
+    const acwr = computeACWR(p.id);
+    return acwr[acwr.length-1].status !== 'ok';
+  }).length;
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Panoramica squadra</h1>
+          <div className="page-sub">Sessione più recente — {DAYS[dayIdx].label} · {DAYS[dayIdx].type}</div>
+        </div>
+      </div>
+
+      <div className="grid grid-4" style={{marginBottom:16}}>
+        <KPICard label="Distanza totale squadra" value={fmt(totalDistance/1000,1)} unit="km" />
+        <KPICard label="Player Load medio" value={fmt(avgLoad)} unit="AU" />
+        <KPICard label="Velocità massima" value={fmt(maxSpeedToday,1)} unit="km/h" />
+        <KPICard label="Distanza media/min" value={fmt(avgDistPerMin,1)} unit="m/min" />
+      </div>
+
+      <div className="grid grid-3" style={{marginBottom:16}}>
+        <div className="card">
+          <div className="card-head"><div className="card-title">Trend carico medio squadra — 21 giorni</div></div>
+          <TrendChart data={teamTrend} xKey="label" area unit="AU"
+            series={[{key:'avgLoad', name:'Player Load medio', color:'#A6E22E'}]}/>
+        </div>
+
+        <div className="card">
+          <div className="card-head"><div className="card-title">Stato del rischio (ACWR)</div></div>
+          <div style={{display:'flex', flexDirection:'column', gap:10}}>
+            {PLAYERS.map(p => {
+              const acwr = computeACWR(p.id);
+              const last = acwr[acwr.length-1];
+              return (
+                <div key={p.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                  <div className="row-player">
+                    <div className="avatar" style={{background:p.color}}>{p.number}</div>
+                    <span style={{fontSize:13.5}}>{p.name.split(' ')[0]} {p.name.split(' ')[1][0]}.</span>
+                  </div>
+                  <span className={"badge " + (last.status==='ok'?'badge-ok':last.status==='warn'?'badge-warn':'badge-danger')}>
+                    {last.acwr}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="section-note">{riskCount>0 ? `${riskCount} giocatori fuori dalla zona ottimale (0.8–1.3).` : 'Tutti i giocatori in zona di carico ottimale.'}</div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><div className="card-title">Sessione odierna per giocatore</div></div>
+        <table>
+          <thead>
+            <tr><th>Giocatore</th><th>Ruolo</th><th>Distanza</th><th>Vel. max</th><th>Sprint</th><th>Player Load</th><th>Dist./min</th></tr>
+          </thead>
+          <tbody>
+            {todaySessions.map(s => {
+              const p = PLAYERS.find(pl=>pl.id===s.playerId);
+              return (
+                <tr key={s.playerId}>
+                  <td><div className="row-player"><div className="avatar" style={{background:p.color}}>{p.number}</div>{p.name}</div></td>
+                  <td style={{color:'var(--text-lo)'}}>{p.role}</td>
+                  <td className="num">{fmt(s.distance/1000,2)} km</td>
+                  <td className="num">{fmt(s.maxSpeed,1)} km/h</td>
+                  <td className="num">{s.sprints}</td>
+                  <td className="num">{fmt(s.playerLoad)}</td>
+                  <td className="num">{fmt(s.distancePerMin,1)} m/min</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ComparePlayersPage(){
+  const [selected, setSelected] = useState(['p1','p3']);
+  const [metric, setMetric] = useState('distance');
+  const [range, setRange] = useState(14);
+
+  const metrics = {
+    distance: {label:'Distanza', unit:'km', div:1000, dec:1},
+    playerLoad: {label:'Player Load', unit:'AU', div:1, dec:0},
+    maxSpeed: {label:'Velocità massima', unit:'km/h', div:1, dec:1},
+    sprints: {label:'Sprint', unit:'n°', div:1, dec:0},
+    distancePerMin: {label:'Distanza/min', unit:'m/min', div:1, dec:1},
+  };
+  const m = metrics[metric];
+  const days = DAYS.slice(-range);
+
+  const chartData = days.map(day => {
+    const row = {label: day.label};
+    selected.forEach(pid => {
+      const s = SESSIONS[pid].find(x=>x.date===day.date);
+      row[pid] = s ? +(s[metric]/m.div).toFixed(m.dec) : 0;
+    });
+    return row;
+  });
+
+  const togglePlayer = (id) => {
+    setSelected(sel => sel.includes(id) ? sel.filter(x=>x!==id) : [...sel, id]);
+  };
+
+  const radarMetricsList = ['distance','playerLoad','maxSpeed','sprints','accels','decels'];
+  const radarLabels = {distance:'Distanza', playerLoad:'Load', maxSpeed:'Vel. Max', sprints:'Sprint', accels:'Accel.', decels:'Decel.'};
+  const radarMax = {};
+  radarMetricsList.forEach(key => {
+    radarMax[key] = Math.max(...PLAYERS.flatMap(p => SESSIONS[p.id].map(s=>s[key])));
+  });
+  const radarData = radarMetricsList.map(key => {
+    const row = {metric: radarLabels[key]};
+    selected.forEach(pid => {
+      const sessions = SESSIONS[pid].filter(s=>s.duration>0);
+      const last = sessions[sessions.length-1];
+      row[pid] = last ? +((last[key]/radarMax[key])*100).toFixed(0) : 0;
+    });
+    return row;
+  });
+
+  const seriesForRadar = selected.map(pid => ({key:pid, name:PLAYERS.find(p=>p.id===pid).name, color:PLAYERS.find(p=>p.id===pid).color}));
+  const seriesForLine = selected.map(pid => ({key:pid, name:PLAYERS.find(p=>p.id===pid).name, color:PLAYERS.find(p=>p.id===pid).color}));
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Confronto giocatori</h1>
+          <div className="page-sub">Seleziona i giocatori e la metrica da confrontare nel tempo</div>
+        </div>
+        <div className="controls">
+          <select value={metric} onChange={e=>setMetric(e.target.value)}>
+            {Object.entries(metrics).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+          </select>
+          <select value={range} onChange={e=>setRange(Number(e.target.value))}>
+            <option value={7}>Ultimi 7 giorni</option>
+            <option value={14}>Ultimi 14 giorni</option>
+            <option value={21}>Ultimi 21 giorni</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="chip-row" style={{marginBottom:18}}>
+        {PLAYERS.map(p => (
+          <button key={p.id} className={"chip" + (selected.includes(p.id) ? " on":"")} style={{'--player-color':p.color}} onClick={()=>togglePlayer(p.id)}>
+            <span className="chip-swatch" style={{background:p.color}}></span>{p.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-3">
+        <div className="card">
+          <div className="card-head"><div className="card-title">{m.label} nel tempo ({m.unit})</div></div>
+          {selected.length === 0 ? <div className="empty-hint">Seleziona almeno un giocatore per vedere il confronto.</div> :
+          <React.Fragment>
+            <TrendChart data={chartData} xKey="label" unit={m.unit} series={seriesForLine}/>
+            <ChartLegend series={seriesForLine}/>
+          </React.Fragment>}
+        </div>
+
+        <div className="card">
+          <div className="card-head"><div className="card-title">Profilo ultima sessione</div></div>
+          {selected.length === 0 ? <div className="empty-hint">Nessun giocatore selezionato.</div> :
+          <React.Fragment>
+            <RadarChart data={radarData} metricKey="metric" series={seriesForRadar}/>
+            <ChartLegend series={seriesForRadar}/>
+          </React.Fragment>}
+          <div className="section-note">Valori normalizzati sul massimo storico registrato per ciascuna metrica.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompareDaysPage(){
+  const trainingDays = DAYS.filter(d=>d.type!=='Riposo');
+  const [dayA, setDayA] = useState(trainingDays[trainingDays.length-8].date);
+  const [dayB, setDayB] = useState(trainingDays[trainingDays.length-1].date);
+
+  const buildDayRow = (date) => {
+    const sessions = PLAYERS.map(p => SESSIONS[p.id].find(s=>s.date===date)).filter(s=>s.duration>0);
+    const dayInfo = DAYS.find(d=>d.date===date);
+    return {
+      date, dayInfo, sessions,
+      totalDistance: sessions.reduce((a,s)=>a+s.distance,0),
+      avgLoad: sessions.length ? Math.round(sessions.reduce((a,s)=>a+s.playerLoad,0)/sessions.length) : 0,
+      avgMaxSpeed: sessions.length ? +(sessions.reduce((a,s)=>a+s.maxSpeed,0)/sessions.length).toFixed(1) : 0,
+      totalSprints: sessions.reduce((a,s)=>a+s.sprints,0),
+      zoneSpeed: sessions.reduce((acc,s)=>{
+        Object.keys(s.zoneSpeed).forEach(z=>acc[z]=(acc[z]||0)+s.zoneSpeed[z]);
+        return acc;
+      },{}),
+    };
+  };
+
+  const A = buildDayRow(dayA);
+  const B = buildDayRow(dayB);
+
+  const barData = [
+    {label:'Distanza (km)', A: +(A.totalDistance/1000).toFixed(1), B: +(B.totalDistance/1000).toFixed(1)},
+    {label:'Player Load medio', A: A.avgLoad, B: B.avgLoad},
+    {label:'Vel. max media', A: A.avgMaxSpeed, B: B.avgMaxSpeed},
+    {label:'Sprint totali', A: A.totalSprints, B: B.totalSprints},
+  ];
+
+  const zoneLabels = {z1:'Z1 · 0-14 km/h', z2:'Z2 · 14-19 km/h', z3:'Z3 · 19-23 km/h', z4:'Z4 · 23-27 km/h', z5:'Z5 · 27+ km/h'};
+  const zoneColors = {z1:'#4FA6E8', z2:'#4FD3B8', z3:'#A6E22E', z4:'#E8A33D', z5:'#E15B4E'};
+
+  const delta = (a,b) => {
+    if(a===0) return {v:0, dir:'flat'};
+    const pct = Math.round(((b-a)/a)*100);
+    return {v: Math.abs(pct), dir: pct>2?'up':pct<-2?'down':'flat'};
+  };
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Confronto giorni</h1>
+          <div className="page-sub">Confronta il carico di lavoro della squadra tra due sessioni</div>
+        </div>
+        <div className="controls">
+          <select value={dayA} onChange={e=>setDayA(e.target.value)}>
+            {trainingDays.map(d=><option key={d.date} value={d.date}>{d.label} — {d.type}</option>)}
+          </select>
+          <span style={{alignSelf:'center', color:'var(--text-lo)'}}>vs</span>
+          <select value={dayB} onChange={e=>setDayB(e.target.value)}>
+            {trainingDays.map(d=><option key={d.date} value={d.date}>{d.label} — {d.type}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-4" style={{marginBottom:16}}>
+        {barData.map((b,i) => {
+          const d = delta(b.A, b.B);
+          return <KPICard key={i} label={b.label + ' — variazione B vs A'} value={(b.B>b.A?'+':'') + fmt(b.B-b.A, i===0||i===2?1:0)} unit="" delta={d.v+'%'} deltaDir={d.dir}/>;
+        })}
+      </div>
+
+      <div className="grid grid-3">
+        <div className="card">
+          <div className="card-head"><div className="card-title">Confronto diretto</div></div>
+          <BarChart2 data={barData} xKey="label" series={[
+            {key:'A', name:A.dayInfo.label, color:'#5FA8D3'},
+            {key:'B', name:B.dayInfo.label, color:'#A6E22E'}
+          ]}/>
+          <ChartLegend series={[{key:'A', name:A.dayInfo.label+' ('+A.dayInfo.type+')', color:'#5FA8D3'},{key:'B', name:B.dayInfo.label+' ('+B.dayInfo.type+')', color:'#A6E22E'}]}/>
+        </div>
+
+        <div className="card">
+          <div className="card-head"><div className="card-title">Distanza per fascia di velocità</div></div>
+          <div className="zone-bar-wrap">
+            {Object.keys(zoneLabels).map(z => {
+              const maxVal = Math.max(A.zoneSpeed[z]||0, B.zoneSpeed[z]||0, 1);
+              return (
+                <div key={z}>
+                  <div style={{fontSize:12, color:'var(--text-lo)', marginBottom:4}}>{zoneLabels[z]}</div>
+                  <div className="zone-row">
+                    <span style={{fontSize:12}}>{A.dayInfo.label}</span>
+                    <div className="zone-track"><div className="zone-fill" style={{width:(((A.zoneSpeed[z]||0)/maxVal)*100)+'%', background:zoneColors[z]}}></div></div>
+                    <span className="num" style={{fontSize:12}}>{fmt((A.zoneSpeed[z]||0)/1000,1)}km</span>
+                  </div>
+                  <div className="zone-row">
+                    <span style={{fontSize:12}}>{B.dayInfo.label}</span>
+                    <div className="zone-track"><div className="zone-fill" style={{width:(((B.zoneSpeed[z]||0)/maxVal)*100)+'%', background:zoneColors[z], opacity:0.55}}></div></div>
+                    <span className="num" style={{fontSize:12}}>{fmt((B.zoneSpeed[z]||0)/1000,1)}km</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoadPage(){
+  const [playerId, setPlayerId] = useState('p1');
+  const player = PLAYERS.find(p=>p.id===playerId);
+  const acwrData = computeACWR(playerId).map(d => ({...d, x: d.label}));
+
+  const last = acwrData[acwrData.length-1];
+  const statusText = {
+    ok: 'Carico in equilibrio, nessuna azione richiesta.',
+    warn: 'Zona di attenzione: monitorare la progressione del carico nei prossimi giorni.',
+    danger: 'Rischio elevato: valutare una riduzione del carico o giorni di recupero.'
+  };
+  const statusBadge = {ok:'badge-ok', warn:'badge-warn', danger:'badge-danger'};
+
+  const monotonySessions = SESSIONS[playerId].slice(-7).filter(s=>s.duration>0);
+  const loadsWeek = monotonySessions.map(s=>s.playerLoad);
+  const meanLoad = loadsWeek.length ? loadsWeek.reduce((a,b)=>a+b,0)/loadsWeek.length : 0;
+  const sdLoad = loadsWeek.length ? Math.sqrt(loadsWeek.reduce((a,b)=>a+Math.pow(b-meanLoad,2),0)/loadsWeek.length) : 0;
+  const monotony = sdLoad > 0 ? +(meanLoad/sdLoad).toFixed(2) : 0;
+  const strain = Math.round(meanLoad * loadsWeek.length * monotony);
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Gestione del carico</h1>
+          <div className="page-sub">Rapporto carico acuto:cronico (ACWR), monotonia e strain — per prevenzione infortuni</div>
+        </div>
+        <div className="controls">
+          <select value={playerId} onChange={e=>setPlayerId(e.target.value)}>
+            {PLAYERS.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-4" style={{marginBottom:16}}>
+        <div className="card kpi-card">
+          <div className="kpi-value num">{last.acwr}</div>
+          <div className="kpi-label">ACWR attuale (zona ottimale 0.8–1.3)</div>
+          <span className={"badge " + statusBadge[last.status]} style={{marginTop:10, display:'inline-block'}}>
+            {last.status==='ok'?'Ottimale':last.status==='warn'?'Attenzione':'Rischio alto'}
+          </span>
+        </div>
+        <KPICard label="Carico acuto (7gg, media)" value={fmt(last.acute)} unit="AU"/>
+        <KPICard label="Carico cronico (28gg, media)" value={fmt(last.chronic)} unit="AU"/>
+        <KPICard label="Monotonia settimanale" value={fmt(monotony,2)} unit={monotony>2?'⚠':''}/>
+      </div>
+
+      <div className="grid grid-3" style={{marginBottom:16}}>
+        <div className="card">
+          <div className="card-head"><div className="card-title">Andamento ACWR — {player.name}</div></div>
+          <TrendChart data={acwrData} xKey="x" unit="" yMin={0} yMax={2}
+            series={[{key:'acwr', name:'ACWR', color:player.color}]}
+            refBands={[{y1:0.8, y2:1.3, color:'#A6E22E', opacity:0.08}]}
+            refLines={[{y:1.5, color:'#E15B4E', label:'Rischio alto'}, {y:0.8, color:'#2A3A2E'}, {y:1.3, color:'#2A3A2E'}]}
+          />
+          <div className="legend-row">
+            <div className="legend-item"><span className="legend-swatch" style={{background:'rgba(166,226,46,0.4)'}}></span>Zona ottimale 0.8–1.3</div>
+            <div className="legend-item"><span className="legend-swatch" style={{background:'#E15B4E'}}></span>Soglia rischio 1.5</div>
+          </div>
+          <div className="section-note">{statusText[last.status]}</div>
+        </div>
+
+        <div className="card">
+          <div className="card-head"><div className="card-title">Carico acuto vs cronico</div></div>
+          <TrendChart data={acwrData} xKey="x" area unit="AU"
+            series={[
+              {key:'chronic', name:'Cronico (28gg)', color:'#5FA8D3'},
+              {key:'acute', name:'Acuto (7gg)', color:'#A6E22E'},
+            ]}/>
+          <ChartLegend series={[{key:'chronic', name:'Cronico (28gg)', color:'#5FA8D3'},{key:'acute', name:'Acuto (7gg)', color:'#A6E22E'}]}/>
+          <div className="section-note">Strain settimanale stimato: <b style={{color:'var(--text-hi)'}}>{fmt(strain)}</b> AU. Valori di strain molto elevati, uniti ad alta monotonia, aumentano il rischio infortuni.</div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><div className="card-title">Stato ACWR di tutta la rosa</div></div>
+        <table>
+          <thead><tr><th>Giocatore</th><th>ACWR</th><th>Acuto (7gg)</th><th>Cronico (28gg)</th><th>Stato</th></tr></thead>
+          <tbody>
+            {PLAYERS.map(p => {
+              const d = computeACWR(p.id);
+              const l = d[d.length-1];
+              return (
+                <tr key={p.id}>
+                  <td><div className="row-player"><div className="avatar" style={{background:p.color}}>{p.number}</div>{p.name}</div></td>
+                  <td className="num">{l.acwr}</td>
+                  <td className="num">{fmt(l.acute)}</td>
+                  <td className="num">{fmt(l.chronic)}</td>
+                  <td><span className={"badge " + statusBadge[l.status]}>{l.status==='ok'?'Ottimale':l.status==='warn'?'Attenzione':'Rischio alto'}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function RosterPage(){
+  const [playerId, setPlayerId] = useState('p1');
+  const player = PLAYERS.find(p=>p.id===playerId);
+  const sessions = SESSIONS[playerId].filter(s=>s.duration>0).slice(-10).reverse();
+
+  const zoneColors = {z1:'#4FA6E8', z2:'#4FD3B8', z3:'#A6E22E', z4:'#E8A33D', z5:'#E15B4E'};
+  const last = SESSIONS[playerId].filter(s=>s.duration>0).slice(-1)[0];
+  const totalZone = Object.values(last.zoneSpeed).reduce((a,b)=>a+b,0) || 1;
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Rosa &amp; sessioni</h1>
+          <div className="page-sub">Storico dettagliato delle sessioni per singolo giocatore</div>
+        </div>
+        <div className="controls">
+          <select value={playerId} onChange={e=>setPlayerId(e.target.value)}>
+            {PLAYERS.map(p=><option key={p.id} value={p.id}>{p.name} · {p.role}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-3" style={{marginBottom:16}}>
+        <div className="card">
+          <div className="card-head"><div className="card-title">Ultime 10 sessioni — {player.name}</div></div>
+          <table>
+            <thead><tr><th>Giorno</th><th>Tipo</th><th>Durata</th><th>Distanza</th><th>Vel. max</th><th>Load</th><th>FC media</th></tr></thead>
+            <tbody>
+              {sessions.map(s => (
+                <tr key={s.date}>
+                  <td>{s.label}</td>
+                  <td style={{color:'var(--text-lo)'}}>{s.type}</td>
+                  <td className="num">{s.duration}'</td>
+                  <td className="num">{fmt(s.distance/1000,2)} km</td>
+                  <td className="num">{fmt(s.maxSpeed,1)} km/h</td>
+                  <td className="num">{fmt(s.playerLoad)}</td>
+                  <td className="num">{s.hrAvgPct}% FCmax</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="card">
+          <div className="card-head"><div className="card-title">Fasce di velocità — ultima sessione</div></div>
+          <div className="zone-bar-wrap">
+            {Object.entries(last.zoneSpeed).map(([z,val]) => (
+              <div className="zone-row" key={z}>
+                <span style={{fontSize:12.5}}>{ {z1:'Z1 0-14',z2:'Z2 14-19',z3:'Z3 19-23',z4:'Z4 23-27',z5:'Z5 27+'}[z] } km/h</span>
+                <div className="zone-track"><div className="zone-fill" style={{width:((val/totalZone)*100)+'%', background:zoneColors[z]}}></div></div>
+                <span className="num" style={{fontSize:12.5}}>{fmt(val/1000,2)} km</span>
+              </div>
+            ))}
+          </div>
+          <div className="section-note">Distanza totale: {fmt(last.distance/1000,2)} km · {fmt(last.distancePerMin,1)} m/min di media</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function App(){
+  const [page, setPage] = useState('overview');
+  const pages = {
+    overview: <OverviewPage/>,
+    'compare-players': <ComparePlayersPage/>,
+    'compare-days': <CompareDaysPage/>,
+    load: <LoadPage/>,
+    roster: <RosterPage/>,
+  };
+  return (
+    <div className="app">
+      <Sidebar page={page} setPage={setPage}/>
+      <div className="main">{pages[page]}</div>
+    </div>
+  );
+}
+
+document.getElementById('root').dataset.mounted = "1";
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
