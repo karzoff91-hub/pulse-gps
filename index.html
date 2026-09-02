@@ -1200,32 +1200,225 @@ function ConfrontiPage(){
       <div className="topbar">
         <div>
           <h1 className="page-title">Confronti</h1>
-          <div className="page-sub">Atleti contro atleti, o le stesse sessioni confrontate nel tempo</div>
+          <div className="page-sub">Atleti contro atleti, sessioni nel tempo, o un confronto 1 vs 1 dettagliato</div>
         </div>
         <div className="controls">
           <button className={"pill-btn" + (mode==='atleti'?' on':'')} onClick={()=>setMode('atleti')} style={{cursor:'pointer'}}>Tra atleti</button>
           <button className={"pill-btn" + (mode==='giorni'?' on':'')} onClick={()=>setMode('giorni')} style={{cursor:'pointer'}}>Tra giorni</button>
+          <button className={"pill-btn" + (mode==='unoauno'?' on':'')} onClick={()=>setMode('unoauno')} style={{cursor:'pointer'}}>1 vs 1 dettagliato</button>
         </div>
       </div>
 
-      <div className="chip-row" style={{marginBottom:18}}>
-        {allPlayerNames.map(name => (
-          <button key={name} className={"chip" + (selectedPlayers.includes(name) ? " on":"")} onClick={()=>togglePlayer(name)}>
-            {name}
-          </button>
-        ))}
+      {mode === 'unoauno' ? <UnoAUnoView/> : (
+        <React.Fragment>
+          <div className="chip-row" style={{marginBottom:18}}>
+            {allPlayerNames.map(name => (
+              <button key={name} className={"chip" + (selectedPlayers.includes(name) ? " on":"")} onClick={()=>togglePlayer(name)}>
+                {name}
+              </button>
+            ))}
+          </div>
+
+          {selectedPlayers.length === 0 ? <div className="empty-hint">Seleziona almeno un giocatore.</div> :
+           mode === 'atleti' ? (
+            <ConfrontiAtletiView teamSessions={teamSessions} selectedPlayers={selectedPlayers} metric={metric} setMetric={setMetric}
+              sortDir={sortDir} setSortDir={setSortDir} sessionIdx={sessionIdx} setSessionIdx={setSessionIdx}
+              compareBase={compareBase} setCompareBase={setCompareBase} m={m}/>
+           ) : (
+            <ConfrontiGiorniView teamSessions={teamSessions} selectedPlayers={selectedPlayers} metric={metric} setMetric={setMetric}
+              dayA={dayA} setDayA={setDayA} dayB={dayB} setDayB={setDayB} m={m}/>
+           )
+          }
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Confronto 1 vs 1 dettagliato (in stile K-Sport) ---------------- */
+
+const RADAR_METRICS = [
+  {key:'%AI', label:'%AI'},
+  {key:'%ED', label:'%ED'},
+  {key:'%D_MPHI', label:'%D_MPHI'},
+  {key:'%D_SHI', label:'%D_SHI'},
+  {key:'%D_AccHI', label:'%D_AccHI'},
+  {key:'%D_DecHI', label:'%D_DecHI'},
+];
+const HI_BAR_METRICS = [
+  {key:'%D_SHI', label:'%D_SHI'},
+  {key:'%D_AccHI', label:'%D_AccHI'},
+  {key:'%D_DecHI', label:'%D_DecHI'},
+  {key:'%D_MPHI', label:'%D_MPHI'},
+  {key:'D_S7', label:'D_S7 (m)'},
+];
+const TOTAL_LOAD_ROWS = [
+  {key:'D', label:'D (m)', dec:2},
+  {key:'Drel', label:'Drel (m/min)', dec:2},
+  {key:'EEE', label:'EEE (kJ/kg)', dec:2},
+  {key:'Smax', label:'Smax (m/s)', dec:2},
+];
+const HIGH_INTENSITY_ROWS = [
+  {key:'D_SHI', label:'D_SHI (m)', dec:2},
+  {key:'D_AccHI', label:'D_AccHI (m)', dec:2},
+  {key:'D_DecHI', label:'D_DecHI (m)', dec:2},
+  {key:'D_MPHI', label:'D_MPHI (m)', dec:2},
+  {key:'D_S6', label:'D_S6 (m)', dec:2},
+  {key:'D_S5', label:'D_S5 (m)', dec:2},
+  {key:'D_S4', label:'D_S4 (m)', dec:2},
+];
+
+function averageRawParams(sessionsSubset){
+  const keys = new Set();
+  sessionsSubset.forEach(s => Object.keys(s.raw).forEach(k=>keys.add(k)));
+  const avg = {};
+  keys.forEach(k => {
+    const vals = sessionsSubset.map(s => s.raw[k]).filter(v => typeof v === 'number');
+    avg[k] = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
+  });
+  return avg;
+}
+
+function formatDurationHMS(totalSeconds){
+  const s = Math.round(totalSeconds||0);
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  return [h,m,sec].map(x=>String(x).padStart(2,'0')).join(':');
+}
+
+function PlayerPickerColumn({label, players, playerName, setPlayerName, mode, setMode, sessions}){
+  const options = [
+    {value:'avg-training', label:'Avg - Full Training'},
+    {value:'avg-match', label:'Avg - Partite'},
+    ...((sessions||[]).map(s => ({value:'session:'+s.sessionId, label: s.label+' — '+s.fullLabel}))),
+  ];
+  return (
+    <div style={{marginBottom:20}}>
+      <div className="card-title" style={{marginBottom:8}}>{label}</div>
+      <select value={playerName} onChange={e=>setPlayerName(e.target.value)} style={{width:'100%', marginBottom:8}}>
+        <option value="">Seleziona giocatore…</option>
+        {players.map(p => <option key={p.PlayerId} value={p.PlayerName}>{p.PlayerName}</option>)}
+      </select>
+      <select value={mode} onChange={e=>setMode(e.target.value)} style={{width:'100%'}} disabled={!playerName}>
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function UnoAUnoView(){
+  const [players, setPlayers] = useState(null);
+  const [error, setError] = useState(null);
+
+  const [name1, setName1] = useState('');
+  const [mode1, setMode1] = useState('avg-training');
+  const [sessions1, setSessions1] = useState(null);
+
+  const [name2, setName2] = useState('');
+  const [mode2, setMode2] = useState('avg-training');
+  const [sessions2, setSessions2] = useState(null);
+
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  React.useEffect(() => { loadPlayers().then(setPlayers).catch(e=>setError(e.message)); }, []);
+
+  React.useEffect(() => { if(name1) loadPlayerSessions(name1.toLowerCase()).then(setSessions1).catch(e=>setError(e.message)); }, [name1]);
+  React.useEffect(() => { if(name2) loadPlayerSessions(name2.toLowerCase()).then(setSessions2).catch(e=>setError(e.message)); }, [name2]);
+
+  const resolveParams = (sessions, mode) => {
+    if(!sessions) return null;
+    if(mode === 'avg-training') return averageRawParams(sessions.filter(s=>!s.isMatch));
+    if(mode === 'avg-match') return averageRawParams(sessions.filter(s=>s.isMatch));
+    if(mode.startsWith('session:')){
+      const id = Number(mode.split(':')[1]);
+      const s = sessions.find(x=>x.sessionId===id);
+      return s ? s.raw : null;
+    }
+    return null;
+  };
+
+  const handleConfronta = () => {
+    setLoading(true);
+    const p1 = resolveParams(sessions1, mode1);
+    const p2 = resolveParams(sessions2, mode2);
+    setResult({ p1, p2 });
+    setLoading(false);
+  };
+
+  if(error) return <ErrorState message={error}/>;
+  if(players === null) return <LoadingState/>;
+
+  return (
+    <div className="grid grid-3">
+      <div className="card">
+        <PlayerPickerColumn label="Giocatore 1" players={players} playerName={name1} setPlayerName={setName1} mode={mode1} setMode={setMode1} sessions={sessions1}/>
+        <PlayerPickerColumn label="Giocatore 2" players={players} playerName={name2} setPlayerName={setName2} mode={mode2} setMode={setMode2} sessions={sessions2}/>
+        <button onClick={handleConfronta} disabled={!name1 || !name2 || loading} className="pill-btn on" style={{width:'100%', cursor:'pointer'}}>
+          {loading ? 'Confronto…' : 'Confronta'}
+        </button>
       </div>
 
-      {selectedPlayers.length === 0 ? <div className="empty-hint">Seleziona almeno un giocatore.</div> :
-       mode === 'atleti' ? (
-        <ConfrontiAtletiView teamSessions={teamSessions} selectedPlayers={selectedPlayers} metric={metric} setMetric={setMetric}
-          sortDir={sortDir} setSortDir={setSortDir} sessionIdx={sessionIdx} setSessionIdx={setSessionIdx}
-          compareBase={compareBase} setCompareBase={setCompareBase} m={m}/>
-       ) : (
-        <ConfrontiGiorniView teamSessions={teamSessions} selectedPlayers={selectedPlayers} metric={metric} setMetric={setMetric}
-          dayA={dayA} setDayA={setDayA} dayB={dayB} setDayB={setDayB} m={m}/>
-       )
-      }
+      <div style={{gridColumn:'span 2'}}>
+        {!result ? <div className="empty-hint">Scegli due giocatori e clicca "Confronta".</div> : !result.p1 || !result.p2 ? (
+          <div className="empty-hint">Dati insufficienti per uno dei due giocatori nella modalità scelta.</div>
+        ) : (
+          <div className="grid grid-3">
+            <div className="card" style={{gridColumn:'span 2'}}>
+              <div className="card-head"><div className="card-title">Performance</div></div>
+              <RadarChart
+                data={RADAR_METRICS.map(rm => ({metric: rm.label, p1: result.p1[rm.key]||0, p2: result.p2[rm.key]||0}))}
+                metricKey="metric"
+                series={[{key:'p1', name:name1, color:'#4FD3B8'}, {key:'p2', name:name2, color:'#E8D53D'}]}
+              />
+              <ChartLegend series={[{key:'p1', name:name1, color:'#4FD3B8'}, {key:'p2', name:name2, color:'#E8D53D'}]}/>
+
+              <div className="card-head" style={{marginTop:20}}><div className="card-title">Alta intensità</div></div>
+              <BarChart2
+                data={HI_BAR_METRICS.map(bm => ({label: bm.label, A: +(result.p1[bm.key]||0).toFixed(2), B: +(result.p2[bm.key]||0).toFixed(2)}))}
+                xKey="label" series={[{key:'A', name:name1, color:'#4FD3B8'}, {key:'B', name:name2, color:'#E8D53D'}]}
+              />
+              <ChartLegend series={[{key:'A', name:name1, color:'#4FD3B8'}, {key:'B', name:name2, color:'#E8D53D'}]}/>
+            </div>
+
+            <div className="card">
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, textAlign:'center', marginBottom:14}}>
+                <div style={{fontWeight:700}}>{name1}</div>
+                <div style={{fontWeight:700}}>{name2}</div>
+              </div>
+              <div className="card-title" style={{marginBottom:8}}>Total Load</div>
+              <table>
+                <tbody>
+                  {TOTAL_LOAD_ROWS.map(r => (
+                    <tr key={r.key}>
+                      <td className="num">{fmt(result.p1[r.key]||0, r.dec)}</td>
+                      <td style={{color:'var(--text-lo)', fontSize:12, textAlign:'center'}}>{r.label}</td>
+                      <td className="num">{fmt(result.p2[r.key]||0, r.dec)}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td className="num">{formatDurationHMS(result.p1.T)}</td>
+                    <td style={{color:'var(--text-lo)', fontSize:12, textAlign:'center'}}>T</td>
+                    <td className="num">{formatDurationHMS(result.p2.T)}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div className="card-title" style={{margin:'16px 0 8px'}}>High Intensity</div>
+              <table>
+                <tbody>
+                  {HIGH_INTENSITY_ROWS.map(r => (
+                    <tr key={r.key}>
+                      <td className="num">{fmt(result.p1[r.key]||0, r.dec)}</td>
+                      <td style={{color:'var(--text-lo)', fontSize:12, textAlign:'center'}}>{r.label}</td>
+                      <td className="num">{fmt(result.p2[r.key]||0, r.dec)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
