@@ -1,7 +1,9 @@
 // /api/documents.js
 // Documenti PDF per giocatore (diagnosi, esami clinici/strumentali).
-// Richiede un Vercel Blob Store collegato al progetto (variabile
-// d'ambiente BLOB_READ_WRITE_TOKEN, aggiunta automaticamente da Vercel).
+// Richiede un Vercel Blob Store collegato al progetto. L'autenticazione è
+// gestita automaticamente da Vercel (OIDC per store collegati, oppure la
+// variabile BLOB_READ_WRITE_TOKEN se presente) — non serve configurare nulla
+// a mano oltre a collegare lo store nel tab "Storage" del progetto.
 // GET    -> ?playerName=... restituisce i documenti di quel giocatore
 // POST   -> { playerName, docType, title, fileBase64, fileName }
 // DELETE -> ?id=123
@@ -47,9 +49,6 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      if (!process.env.BLOB_READ_WRITE_TOKEN) {
-        return res.status(500).json({ error: 'Storage file non configurato: crea un Vercel Blob Store e collegalo al progetto.' });
-      }
       const { playerName, docType, title, fileBase64, fileName } = req.body || {};
       if (!playerName || !docType || !fileBase64 || !fileName) {
         return res.status(400).json({ error: 'playerName, docType, fileBase64 e fileName sono obbligatori.' });
@@ -58,10 +57,17 @@ export default async function handler(req, res) {
       if (buffer.length > 4 * 1024 * 1024) {
         return res.status(400).json({ error: 'File troppo grande (limite 4 MB).' });
       }
-      const blob = await put(`documents/${playerName}/${Date.now()}-${fileName}`, buffer, {
-        access: 'public',
-        contentType: 'application/pdf',
-      });
+
+      let blob;
+      try {
+        blob = await put(`documents/${playerName}/${Date.now()}-${fileName}`, buffer, {
+          access: 'public',
+          contentType: 'application/pdf',
+        });
+      } catch (blobErr) {
+        return res.status(500).json({ error: 'Blob Store non collegato o non autorizzato. Verifica in Vercel > Storage che sia collegato a questo progetto.', details: blobErr.message });
+      }
+
       const { rows } = await client.query(
         `INSERT INTO player_documents (player_name, doc_type, title, blob_url) VALUES ($1, $2, $3, $4) RETURNING *`,
         [playerName, docType, title || fileName, blob.url]
@@ -73,8 +79,8 @@ export default async function handler(req, res) {
       const { id } = req.query;
       if (!id) return res.status(400).json({ error: 'Parametro id mancante.' });
       const { rows } = await client.query('SELECT blob_url FROM player_documents WHERE id = $1', [id]);
-      if (rows[0] && process.env.BLOB_READ_WRITE_TOKEN) {
-        try { await del(rows[0].blob_url); } catch(e) { /* ignora se già rimosso */ }
+      if (rows[0]) {
+        try { await del(rows[0].blob_url); } catch(e) { /* ignora se già rimosso o non raggiungibile */ }
       }
       await client.query('DELETE FROM player_documents WHERE id = $1', [id]);
       return res.status(200).json({ Result: 'OK' });
