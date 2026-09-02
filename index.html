@@ -394,85 +394,113 @@ function ChartLegend({series}){
 }
 
 /* =================================================================
-   DATI SIMULATI — sostituibili con chiamate alle API GPS reali
+   CONFIGURAZIONE — dati reali via API K-Sport (Gironda)
    ================================================================= */
 
-const PLAYERS = [
-  {id:'p1', name:'Marco Rossi', number:7, role:'Attaccante', color:'#A6E22E'},
-  {id:'p2', name:'Luca Bianchi', number:4, role:'Difensore', color:'#5FA8D3'},
-  {id:'p3', name:'Davide Conti', number:8, role:'Centrocampista', color:'#E8A33D'},
-  {id:'p4', name:'Simone Ferri', number:11, role:'Ala', color:'#9B8CE8'},
-  {id:'p5', name:'Andrea Greco', number:5, role:'Difensore', color:'#E15B4E'},
-  {id:'p6', name:'Nicolò Fabbri', number:6, role:'Centrocampista', color:'#4FD3B8'},
-];
+const TEAM_ID = 46247;
+const PLAYER_FILTER = 'gironda';
+const PLAYER_LABEL = 'Gironda';
+const MAX_SESSIONS = 20; // quante sessioni recenti caricare
 
-function seedRandom(seed){
-  let s = seed % 2147483647;
-  if (s <= 0) s += 2147483646;
-  return function(){
-    s = (s * 16807) % 2147483647;
-    return (s - 1) / 2147483646;
-  };
+// Drill che rappresentano una sessione "completa" (evitiamo di sommare
+// sotto-esercizi come Aerobic/Agility Training per non duplicare la distanza)
+function isFullSession(drill){
+  const d = (drill || '').toLowerCase();
+  return d.startsWith('full training') || d.startsWith('full match') ||
+         d.startsWith('full extra time') || d === 'partita';
 }
 
-function genDays(n){
-  const days = [];
-  const today = new Date(2026, 8, 2);
-  for(let i=n-1;i>=0;i--){
-    const d = new Date(today);
-    d.setDate(d.getDate()-i);
-    const isMatch = d.getDay() === 0;
-    days.push({
-      date: d.toISOString().slice(0,10),
-      label: d.toLocaleDateString('it-IT', {weekday:'short', day:'2-digit', month:'2-digit'}),
-      type: isMatch ? 'Partita' : (d.getDay() === 3 ? 'Riposo' : 'Allenamento')
-    });
-  }
-  return days;
+// Etichette leggibili per i parametri K-Sport riconosciuti con certezza.
+// I parametri il cui significato esatto non è documentato restano con il
+// codice originale invece di una traduzione inventata.
+const PARAM_LABELS = {
+  D: 'Distanza totale (m)',
+  T: 'Durata (s)',
+  Drel: 'Distanza relativa (m/min)',
+  Smax: 'Velocità massima (m/s)',
+  D_SHI: 'Distanza alta intensità (m)',
+  T_SHI: 'Tempo alta intensità (s)',
+  D_AccHI: 'Distanza in accelerazione alta intensità (m)',
+  D_DecHI: 'Distanza in decelerazione alta intensità (m)',
+  D_S4: 'Distanza zona 4 (m)',
+  D_S5: 'Distanza zona 5 (m)',
+  D_S6: 'Distanza zona 6 (m)',
+  D_S7: 'Distanza zona 7 (m)',
+  '%D_SHI': '% distanza alta intensità',
+};
+
+function paramsToObject(dataArray){
+  const obj = {};
+  (dataArray || []).forEach(d => { obj[d.ParameterName] = d.Value; });
+  return obj;
 }
 
-const DAYS = genDays(21);
+/* Chiama le funzioni serverless /api/* (mai le API K-Sport direttamente:
+   le credenziali restano protette lato server). */
+async function apiGet(path){
+  const res = await fetch(path);
+  if(!res.ok) throw new Error('Errore di rete (' + res.status + ')');
+  const json = await res.json();
+  if(json && json.error) throw new Error(json.error);
+  return json;
+}
 
-const SESSIONS = {};
-PLAYERS.forEach((p, pi) => {
-  const rnd = seedRandom(1000 + pi*77);
-  SESSIONS[p.id] = DAYS.map((day, di) => {
-    if(day.type === 'Riposo'){
-      return {...day, playerId:p.id, distance:0, distancePerMin:0, maxSpeed:0, sprints:0, accels:0, decels:0,
-        playerLoad:0, duration:0, hrAvgPct:0,
-        zoneSpeed:{z1:0,z2:0,z3:0,z4:0,z5:0}};
+async function loadGirondaSessions(){
+  const sessionsResp = await apiGet(`/api/sessions?teamID=${TEAM_ID}`);
+  const all = (sessionsResp.Records || []);
+  const fullSessions = all.filter(s => isFullSession(s.Drill));
+  fullSessions.sort((a,b) => b.Date - a.Date);
+  const recent = fullSessions.slice(0, MAX_SESSIONS);
+
+  const detailed = await Promise.all(recent.map(async (s) => {
+    try{
+      const detail = await apiGet(`/api/session-data?sessionId=${s.Session_ID}&players=${PLAYER_FILTER}`);
+      const player = detail.Data && detail.Data.Players && detail.Data.Players[0];
+      if(!player) return null;
+      const p = paramsToObject(player.Data);
+      const durationSec = p.T || 0;
+      const durationMin = durationSec / 60;
+      const distance = p.D || 0;
+      return {
+        sessionId: s.Session_ID,
+        dateUnix: s.Date,
+        dateObj: new Date(s.Date * 1000),
+        label: new Date(s.Date * 1000).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit', year:'2-digit'}),
+        fullLabel: s.Session,
+        isMatch: /full match|partita|extra time/i.test(s.Drill),
+        raw: p,
+        distance,
+        durationSec,
+        durationMin,
+        maxSpeedMs: p.Smax || 0,
+        maxSpeedKmh: (p.Smax || 0) * 3.6,
+        distPerMin: p.Drel || (durationMin > 0 ? distance / durationMin : 0),
+        hiDistance: p.D_SHI || 0,
+        hiTime: p.T_SHI || 0,
+        accHiDistance: p.D_AccHI || 0,
+        decHiDistance: p.D_DecHI || 0,
+        pctHi: p['%D_SHI'] || 0,
+        zones: { z4: p.D_S4 || 0, z5: p.D_S5 || 0, z6: p.D_S6 || 0, z7: p.D_S7 || 0 },
+      };
+    } catch(e){
+      return null;
     }
-    const isMatch = day.type === 'Partita';
-    const base = isMatch ? 1.35 : 1.0;
-    const duration = isMatch ? 90 + Math.round(rnd()*8) : 70 + Math.round(rnd()*35);
-    const distance = Math.round((5200 + rnd()*3600) * base * (duration/90));
-    const maxSpeed = +(26 + rnd()*8 + (isMatch?1.5:0)).toFixed(1);
-    const sprints = Math.round((10 + rnd()*18) * base);
-    const accels = Math.round((18 + rnd()*22) * base);
-    const decels = Math.round((16 + rnd()*20) * base);
-    const playerLoad = Math.round((320 + rnd()*220) * base * (duration/90));
-    const distancePerMin = +(distance/duration).toFixed(1);
-    const hrAvgPct = Math.round((72 + rnd()*18) * (isMatch?1.05:1));
-    const z5 = Math.round(distance * (0.03 + rnd()*0.05) * base);
-    const z4 = Math.round(distance * (0.08 + rnd()*0.06) * base);
-    const z3 = Math.round(distance * (0.18 + rnd()*0.07));
-    const z2 = Math.round(distance * (0.28 + rnd()*0.06));
-    const z1 = Math.max(0, distance - z2 - z3 - z4 - z5);
-    return {
-      ...day, playerId:p.id, distance, distancePerMin, maxSpeed, sprints, accels, decels,
-      playerLoad, duration, hrAvgPct,
-      zoneSpeed:{z1,z2,z3,z4,z5}
-    };
-  });
-});
+  }));
 
-function computeACWR(playerId){
-  const sessions = SESSIONS[playerId];
+  return detailed.filter(Boolean).sort((a,b) => a.dateUnix - b.dateUnix);
+}
+
+/* ACWR (rapporto carico acuto:cronico), usando la Distanza come proxy di
+   carico — K-Sport non espone un "Player Load" proprietario via API, quindi
+   la distanza totale per sessione è l'indicatore di carico più affidabile
+   disponibile qui. Le finestre sono calcolate per indice di sessione (non
+   per giorno di calendario), utile perché i dati hanno interruzioni stagionali. */
+function computeACWR(sessions){
   return sessions.map((s, i) => {
     const acuteWindow = sessions.slice(Math.max(0,i-6), i+1);
     const chronicWindow = sessions.slice(Math.max(0,i-27), i+1);
-    const acute = acuteWindow.reduce((a,x)=>a+x.playerLoad,0) / acuteWindow.length;
-    const chronic = chronicWindow.reduce((a,x)=>a+x.playerLoad,0) / chronicWindow.length;
+    const acute = acuteWindow.reduce((a,x)=>a+x.distance,0) / acuteWindow.length;
+    const chronic = chronicWindow.reduce((a,x)=>a+x.distance,0) / chronicWindow.length;
     const ratio = chronic > 0 ? +(acute/chronic).toFixed(2) : 0;
     let status = 'ok';
     if(ratio > 1.5) status = 'danger';
@@ -481,7 +509,7 @@ function computeACWR(playerId){
   });
 }
 
-const fmt = (n, d=0) => n.toLocaleString('it-IT', {minimumFractionDigits:d, maximumFractionDigits:d});
+const fmt = (n, d=0) => (n||0).toLocaleString('it-IT', {minimumFractionDigits:d, maximumFractionDigits:d});
 
 /* =================================================================
    UI
@@ -490,10 +518,9 @@ const fmt = (n, d=0) => n.toLocaleString('it-IT', {minimumFractionDigits:d, maxi
 function Sidebar({page, setPage}){
   const items = [
     {id:'overview', label:'Panoramica'},
-    {id:'compare-players', label:'Confronto Giocatori'},
-    {id:'compare-days', label:'Confronto Giorni'},
+    {id:'compare-days', label:'Confronto Sessioni'},
     {id:'load', label:'Gestione Carico'},
-    {id:'roster', label:'Rosa & Sessioni'},
+    {id:'roster', label:'Storico & Parametri'},
   ];
   return (
     <div className="sidebar">
@@ -510,7 +537,8 @@ function Sidebar({page, setPage}){
         </button>
       ))}
       <div className="sidebar-foot">
-        Dati simulati per prototipo.<br/>Collega gli endpoint API reali per dati live.
+        Dati reali K-Sport — atleta {PLAYER_LABEL}.<br/>
+        Il carico usa la distanza come proxy (Player Load non disponibile via API).
       </div>
     </div>
   );
@@ -530,96 +558,77 @@ function KPICard({label, value, unit, delta, deltaLabel, deltaDir}){
   );
 }
 
-function OverviewPage(){
-  const teamDay = DAYS[DAYS.length-1].date;
-  const dayIdx = DAYS.findIndex(d=>d.date===teamDay);
-  const todaySessions = PLAYERS.map(p => SESSIONS[p.id][dayIdx]).filter(s=>s.duration>0);
-  const totalDistance = todaySessions.reduce((a,s)=>a+s.distance,0);
-  const avgLoad = todaySessions.length ? Math.round(todaySessions.reduce((a,s)=>a+s.playerLoad,0)/todaySessions.length) : 0;
-  const maxSpeedToday = todaySessions.length ? Math.max(...todaySessions.map(s=>s.maxSpeed)) : 0;
-  const avgDistPerMin = todaySessions.length ? +(todaySessions.reduce((a,s)=>a+s.distancePerMin,0)/todaySessions.length).toFixed(1) : 0;
+function LoadingState(){
+  return <div className="empty-hint" style={{padding:'80px 0'}}>Caricamento dati da K-Sport in corso…</div>;
+}
 
-  const teamTrend = DAYS.map(day => {
-    const sessions = PLAYERS.map(p => SESSIONS[p.id].find(s=>s.date===day.date));
-    const active = sessions.filter(s=>s.duration>0);
-    return {
-      label: day.label,
-      avgLoad: active.length ? Math.round(active.reduce((a,s)=>a+s.playerLoad,0)/active.length) : 0,
-    };
-  });
+function ErrorState({message}){
+  return (
+    <div className="card" style={{borderColor:'var(--red)'}}>
+      <div className="card-title" style={{color:'var(--red)', marginBottom:8}}>Errore nel caricamento dei dati</div>
+      <div className="section-note">{message}</div>
+    </div>
+  );
+}
 
-  const riskCount = PLAYERS.filter(p => {
-    const acwr = computeACWR(p.id);
-    return acwr[acwr.length-1].status !== 'ok';
-  }).length;
+function OverviewPage({sessions}){
+  if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione trovata per {PLAYER_LABEL}.</div>;
+  const last = sessions[sessions.length-1];
+  const acwrData = computeACWR(sessions);
+  const lastAcwr = acwrData[acwrData.length-1];
+
+  const trend = sessions.map(s => ({ label: s.label, distance: +(s.distance/1000).toFixed(2) }));
 
   return (
     <div>
       <div className="topbar">
         <div>
-          <h1 className="page-title">Panoramica squadra</h1>
-          <div className="page-sub">Sessione più recente — {DAYS[dayIdx].label} · {DAYS[dayIdx].type}</div>
+          <h1 className="page-title">Panoramica — {PLAYER_LABEL}</h1>
+          <div className="page-sub">Sessione più recente: {last.fullLabel} · {last.label}</div>
         </div>
       </div>
 
       <div className="grid grid-4" style={{marginBottom:16}}>
-        <KPICard label="Distanza totale squadra" value={fmt(totalDistance/1000,1)} unit="km" />
-        <KPICard label="Player Load medio" value={fmt(avgLoad)} unit="AU" />
-        <KPICard label="Velocità massima" value={fmt(maxSpeedToday,1)} unit="km/h" />
-        <KPICard label="Distanza media/min" value={fmt(avgDistPerMin,1)} unit="m/min" />
+        <KPICard label="Distanza sessione" value={fmt(last.distance/1000,2)} unit="km" />
+        <KPICard label="Durata" value={fmt(last.durationMin,0)} unit="min" />
+        <KPICard label="Velocità massima" value={fmt(last.maxSpeedKmh,1)} unit="km/h" />
+        <KPICard label="Distanza/min" value={fmt(last.distPerMin,1)} unit="m/min" />
       </div>
 
       <div className="grid grid-3" style={{marginBottom:16}}>
         <div className="card">
-          <div className="card-head"><div className="card-title">Trend carico medio squadra — 21 giorni</div></div>
-          <TrendChart data={teamTrend} xKey="label" area unit="AU"
-            series={[{key:'avgLoad', name:'Player Load medio', color:'#A6E22E'}]}/>
+          <div className="card-head"><div className="card-title">Distanza per sessione — ultime {sessions.length}</div></div>
+          <TrendChart data={trend} xKey="label" area unit="km"
+            series={[{key:'distance', name:'Distanza', color:'#A6E22E'}]}/>
         </div>
 
         <div className="card">
-          <div className="card-head"><div className="card-title">Stato del rischio (ACWR)</div></div>
-          <div style={{display:'flex', flexDirection:'column', gap:10}}>
-            {PLAYERS.map(p => {
-              const acwr = computeACWR(p.id);
-              const last = acwr[acwr.length-1];
-              return (
-                <div key={p.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                  <div className="row-player">
-                    <div className="avatar" style={{background:p.color}}>{p.number}</div>
-                    <span style={{fontSize:13.5}}>{p.name.split(' ')[0]} {p.name.split(' ')[1][0]}.</span>
-                  </div>
-                  <span className={"badge " + (last.status==='ok'?'badge-ok':last.status==='warn'?'badge-warn':'badge-danger')}>
-                    {last.acwr}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          <div className="section-note">{riskCount>0 ? `${riskCount} giocatori fuori dalla zona ottimale (0.8–1.3).` : 'Tutti i giocatori in zona di carico ottimale.'}</div>
+          <div className="card-head"><div className="card-title">Stato del carico (ACWR)</div></div>
+          <div className="kpi-value num" style={{fontSize:48}}>{lastAcwr.acwr}</div>
+          <span className={"badge " + (lastAcwr.status==='ok'?'badge-ok':lastAcwr.status==='warn'?'badge-warn':'badge-danger')} style={{marginTop:8, display:'inline-block'}}>
+            {lastAcwr.status==='ok'?'Ottimale':lastAcwr.status==='warn'?'Attenzione':'Rischio alto'}
+          </span>
+          <div className="section-note">Zona ottimale 0.8–1.3. Calcolato su distanza come proxy di carico.</div>
         </div>
       </div>
 
       <div className="card">
-        <div className="card-head"><div className="card-title">Sessione odierna per giocatore</div></div>
+        <div className="card-head"><div className="card-title">Ultime sessioni</div></div>
         <table>
           <thead>
-            <tr><th>Giocatore</th><th>Ruolo</th><th>Distanza</th><th>Vel. max</th><th>Sprint</th><th>Player Load</th><th>Dist./min</th></tr>
+            <tr><th>Sessione</th><th>Tipo</th><th>Distanza</th><th>Vel. max</th><th>Durata</th><th>% alta intensità</th></tr>
           </thead>
           <tbody>
-            {todaySessions.map(s => {
-              const p = PLAYERS.find(pl=>pl.id===s.playerId);
-              return (
-                <tr key={s.playerId}>
-                  <td><div className="row-player"><div className="avatar" style={{background:p.color}}>{p.number}</div>{p.name}</div></td>
-                  <td style={{color:'var(--text-lo)'}}>{p.role}</td>
-                  <td className="num">{fmt(s.distance/1000,2)} km</td>
-                  <td className="num">{fmt(s.maxSpeed,1)} km/h</td>
-                  <td className="num">{s.sprints}</td>
-                  <td className="num">{fmt(s.playerLoad)}</td>
-                  <td className="num">{fmt(s.distancePerMin,1)} m/min</td>
-                </tr>
-              );
-            })}
+            {sessions.slice().reverse().map(s => (
+              <tr key={s.sessionId}>
+                <td>{s.fullLabel} <span style={{color:'var(--text-lo)'}}>· {s.label}</span></td>
+                <td style={{color:'var(--text-lo)'}}>{s.isMatch ? 'Partita' : 'Allenamento'}</td>
+                <td className="num">{fmt(s.distance/1000,2)} km</td>
+                <td className="num">{fmt(s.maxSpeedKmh,1)} km/h</td>
+                <td className="num">{fmt(s.durationMin,0)} min</td>
+                <td className="num">{fmt(s.pctHi,1)}%</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -627,238 +636,95 @@ function OverviewPage(){
   );
 }
 
-function ComparePlayersPage(){
-  const [selected, setSelected] = useState(['p1','p3']);
-  const [metric, setMetric] = useState('distance');
-  const [range, setRange] = useState(14);
+function CompareDaysPage({sessions}){
+  const [idxA, setIdxA] = useState(Math.max(0, sessions.length-8));
+  const [idxB, setIdxB] = useState(sessions.length-1);
 
-  const metrics = {
-    distance: {label:'Distanza', unit:'km', div:1000, dec:1},
-    playerLoad: {label:'Player Load', unit:'AU', div:1, dec:0},
-    maxSpeed: {label:'Velocità massima', unit:'km/h', div:1, dec:1},
-    sprints: {label:'Sprint', unit:'n°', div:1, dec:0},
-    distancePerMin: {label:'Distanza/min', unit:'m/min', div:1, dec:1},
-  };
-  const m = metrics[metric];
-  const days = DAYS.slice(-range);
+  if(sessions.length < 2) return <div className="empty-hint">Servono almeno 2 sessioni per un confronto.</div>;
 
-  const chartData = days.map(day => {
-    const row = {label: day.label};
-    selected.forEach(pid => {
-      const s = SESSIONS[pid].find(x=>x.date===day.date);
-      row[pid] = s ? +(s[metric]/m.div).toFixed(m.dec) : 0;
-    });
-    return row;
-  });
-
-  const togglePlayer = (id) => {
-    setSelected(sel => sel.includes(id) ? sel.filter(x=>x!==id) : [...sel, id]);
-  };
-
-  const radarMetricsList = ['distance','playerLoad','maxSpeed','sprints','accels','decels'];
-  const radarLabels = {distance:'Distanza', playerLoad:'Load', maxSpeed:'Vel. Max', sprints:'Sprint', accels:'Accel.', decels:'Decel.'};
-  const radarMax = {};
-  radarMetricsList.forEach(key => {
-    radarMax[key] = Math.max(...PLAYERS.flatMap(p => SESSIONS[p.id].map(s=>s[key])));
-  });
-  const radarData = radarMetricsList.map(key => {
-    const row = {metric: radarLabels[key]};
-    selected.forEach(pid => {
-      const sessions = SESSIONS[pid].filter(s=>s.duration>0);
-      const last = sessions[sessions.length-1];
-      row[pid] = last ? +((last[key]/radarMax[key])*100).toFixed(0) : 0;
-    });
-    return row;
-  });
-
-  const seriesForRadar = selected.map(pid => ({key:pid, name:PLAYERS.find(p=>p.id===pid).name, color:PLAYERS.find(p=>p.id===pid).color}));
-  const seriesForLine = selected.map(pid => ({key:pid, name:PLAYERS.find(p=>p.id===pid).name, color:PLAYERS.find(p=>p.id===pid).color}));
-
-  return (
-    <div>
-      <div className="topbar">
-        <div>
-          <h1 className="page-title">Confronto giocatori</h1>
-          <div className="page-sub">Seleziona i giocatori e la metrica da confrontare nel tempo</div>
-        </div>
-        <div className="controls">
-          <select value={metric} onChange={e=>setMetric(e.target.value)}>
-            {Object.entries(metrics).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-          </select>
-          <select value={range} onChange={e=>setRange(Number(e.target.value))}>
-            <option value={7}>Ultimi 7 giorni</option>
-            <option value={14}>Ultimi 14 giorni</option>
-            <option value={21}>Ultimi 21 giorni</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="chip-row" style={{marginBottom:18}}>
-        {PLAYERS.map(p => (
-          <button key={p.id} className={"chip" + (selected.includes(p.id) ? " on":"")} style={{'--player-color':p.color}} onClick={()=>togglePlayer(p.id)}>
-            <span className="chip-swatch" style={{background:p.color}}></span>{p.name}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid grid-3">
-        <div className="card">
-          <div className="card-head"><div className="card-title">{m.label} nel tempo ({m.unit})</div></div>
-          {selected.length === 0 ? <div className="empty-hint">Seleziona almeno un giocatore per vedere il confronto.</div> :
-          <React.Fragment>
-            <TrendChart data={chartData} xKey="label" unit={m.unit} series={seriesForLine}/>
-            <ChartLegend series={seriesForLine}/>
-          </React.Fragment>}
-        </div>
-
-        <div className="card">
-          <div className="card-head"><div className="card-title">Profilo ultima sessione</div></div>
-          {selected.length === 0 ? <div className="empty-hint">Nessun giocatore selezionato.</div> :
-          <React.Fragment>
-            <RadarChart data={radarData} metricKey="metric" series={seriesForRadar}/>
-            <ChartLegend series={seriesForRadar}/>
-          </React.Fragment>}
-          <div className="section-note">Valori normalizzati sul massimo storico registrato per ciascuna metrica.</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CompareDaysPage(){
-  const trainingDays = DAYS.filter(d=>d.type!=='Riposo');
-  const [dayA, setDayA] = useState(trainingDays[trainingDays.length-8].date);
-  const [dayB, setDayB] = useState(trainingDays[trainingDays.length-1].date);
-
-  const buildDayRow = (date) => {
-    const sessions = PLAYERS.map(p => SESSIONS[p.id].find(s=>s.date===date)).filter(s=>s.duration>0);
-    const dayInfo = DAYS.find(d=>d.date===date);
-    return {
-      date, dayInfo, sessions,
-      totalDistance: sessions.reduce((a,s)=>a+s.distance,0),
-      avgLoad: sessions.length ? Math.round(sessions.reduce((a,s)=>a+s.playerLoad,0)/sessions.length) : 0,
-      avgMaxSpeed: sessions.length ? +(sessions.reduce((a,s)=>a+s.maxSpeed,0)/sessions.length).toFixed(1) : 0,
-      totalSprints: sessions.reduce((a,s)=>a+s.sprints,0),
-      zoneSpeed: sessions.reduce((acc,s)=>{
-        Object.keys(s.zoneSpeed).forEach(z=>acc[z]=(acc[z]||0)+s.zoneSpeed[z]);
-        return acc;
-      },{}),
-    };
-  };
-
-  const A = buildDayRow(dayA);
-  const B = buildDayRow(dayB);
+  const A = sessions[idxA];
+  const B = sessions[idxB];
 
   const barData = [
-    {label:'Distanza (km)', A: +(A.totalDistance/1000).toFixed(1), B: +(B.totalDistance/1000).toFixed(1)},
-    {label:'Player Load medio', A: A.avgLoad, B: B.avgLoad},
-    {label:'Vel. max media', A: A.avgMaxSpeed, B: B.avgMaxSpeed},
-    {label:'Sprint totali', A: A.totalSprints, B: B.totalSprints},
+    {label:'Distanza (km)', A: +(A.distance/1000).toFixed(2), B: +(B.distance/1000).toFixed(2)},
+    {label:'Vel. max (km/h)', A: +A.maxSpeedKmh.toFixed(1), B: +B.maxSpeedKmh.toFixed(1)},
+    {label:'Durata (min)', A: Math.round(A.durationMin), B: Math.round(B.durationMin)},
+    {label:'% alta intensità', A: +A.pctHi.toFixed(1), B: +B.pctHi.toFixed(1)},
   ];
 
-  const zoneLabels = {z1:'Z1 · 0-14 km/h', z2:'Z2 · 14-19 km/h', z3:'Z3 · 19-23 km/h', z4:'Z4 · 23-27 km/h', z5:'Z5 · 27+ km/h'};
-  const zoneColors = {z1:'#4FA6E8', z2:'#4FD3B8', z3:'#A6E22E', z4:'#E8A33D', z5:'#E15B4E'};
-
-  const delta = (a,b) => {
-    if(a===0) return {v:0, dir:'flat'};
-    const pct = Math.round(((b-a)/a)*100);
-    return {v: Math.abs(pct), dir: pct>2?'up':pct<-2?'down':'flat'};
-  };
+  const zoneMax = Math.max(A.zones.z4,A.zones.z5,A.zones.z6,A.zones.z7,B.zones.z4,B.zones.z5,B.zones.z6,B.zones.z7,1);
 
   return (
     <div>
       <div className="topbar">
         <div>
-          <h1 className="page-title">Confronto giorni</h1>
-          <div className="page-sub">Confronta il carico di lavoro della squadra tra due sessioni</div>
+          <h1 className="page-title">Confronto sessioni</h1>
+          <div className="page-sub">Confronta due sessioni di {PLAYER_LABEL}</div>
         </div>
         <div className="controls">
-          <select value={dayA} onChange={e=>setDayA(e.target.value)}>
-            {trainingDays.map(d=><option key={d.date} value={d.date}>{d.label} — {d.type}</option>)}
+          <select value={idxA} onChange={e=>setIdxA(Number(e.target.value))}>
+            {sessions.map((s,i)=><option key={s.sessionId} value={i}>{s.label} — {s.fullLabel}</option>)}
           </select>
           <span style={{alignSelf:'center', color:'var(--text-lo)'}}>vs</span>
-          <select value={dayB} onChange={e=>setDayB(e.target.value)}>
-            {trainingDays.map(d=><option key={d.date} value={d.date}>{d.label} — {d.type}</option>)}
+          <select value={idxB} onChange={e=>setIdxB(Number(e.target.value))}>
+            {sessions.map((s,i)=><option key={s.sessionId} value={i}>{s.label} — {s.fullLabel}</option>)}
           </select>
         </div>
-      </div>
-
-      <div className="grid grid-4" style={{marginBottom:16}}>
-        {barData.map((b,i) => {
-          const d = delta(b.A, b.B);
-          return <KPICard key={i} label={b.label + ' — variazione B vs A'} value={(b.B>b.A?'+':'') + fmt(b.B-b.A, i===0||i===2?1:0)} unit="" delta={d.v+'%'} deltaDir={d.dir}/>;
-        })}
       </div>
 
       <div className="grid grid-3">
         <div className="card">
           <div className="card-head"><div className="card-title">Confronto diretto</div></div>
           <BarChart2 data={barData} xKey="label" series={[
-            {key:'A', name:A.dayInfo.label, color:'#5FA8D3'},
-            {key:'B', name:B.dayInfo.label, color:'#A6E22E'}
+            {key:'A', name:A.label, color:'#5FA8D3'},
+            {key:'B', name:B.label, color:'#A6E22E'}
           ]}/>
-          <ChartLegend series={[{key:'A', name:A.dayInfo.label+' ('+A.dayInfo.type+')', color:'#5FA8D3'},{key:'B', name:B.dayInfo.label+' ('+B.dayInfo.type+')', color:'#A6E22E'}]}/>
+          <ChartLegend series={[{key:'A', name:A.label+' — '+A.fullLabel, color:'#5FA8D3'},{key:'B', name:B.label+' — '+B.fullLabel, color:'#A6E22E'}]}/>
         </div>
 
         <div className="card">
-          <div className="card-head"><div className="card-title">Distanza per fascia di velocità</div></div>
+          <div className="card-head"><div className="card-title">Distanza per zona di velocità</div></div>
           <div className="zone-bar-wrap">
-            {Object.keys(zoneLabels).map(z => {
-              const maxVal = Math.max(A.zoneSpeed[z]||0, B.zoneSpeed[z]||0, 1);
-              return (
-                <div key={z}>
-                  <div style={{fontSize:12, color:'var(--text-lo)', marginBottom:4}}>{zoneLabels[z]}</div>
-                  <div className="zone-row">
-                    <span style={{fontSize:12}}>{A.dayInfo.label}</span>
-                    <div className="zone-track"><div className="zone-fill" style={{width:(((A.zoneSpeed[z]||0)/maxVal)*100)+'%', background:zoneColors[z]}}></div></div>
-                    <span className="num" style={{fontSize:12}}>{fmt((A.zoneSpeed[z]||0)/1000,1)}km</span>
-                  </div>
-                  <div className="zone-row">
-                    <span style={{fontSize:12}}>{B.dayInfo.label}</span>
-                    <div className="zone-track"><div className="zone-fill" style={{width:(((B.zoneSpeed[z]||0)/maxVal)*100)+'%', background:zoneColors[z], opacity:0.55}}></div></div>
-                    <span className="num" style={{fontSize:12}}>{fmt((B.zoneSpeed[z]||0)/1000,1)}km</span>
-                  </div>
+            {['z4','z5','z6','z7'].map(z => (
+              <div key={z}>
+                <div style={{fontSize:12, color:'var(--text-lo)', marginBottom:4}}>Zona {z.slice(1)}</div>
+                <div className="zone-row">
+                  <span style={{fontSize:12}}>{A.label}</span>
+                  <div className="zone-track"><div className="zone-fill" style={{width:((A.zones[z]/zoneMax)*100)+'%', background:'#5FA8D3'}}></div></div>
+                  <span className="num" style={{fontSize:12}}>{fmt(A.zones[z],0)}m</span>
                 </div>
-              );
-            })}
+                <div className="zone-row">
+                  <span style={{fontSize:12}}>{B.label}</span>
+                  <div className="zone-track"><div className="zone-fill" style={{width:((B.zones[z]/zoneMax)*100)+'%', background:'#A6E22E'}}></div></div>
+                  <span className="num" style={{fontSize:12}}>{fmt(B.zones[z],0)}m</span>
+                </div>
+              </div>
+            ))}
           </div>
+          <div className="section-note">Le soglie km/h esatte di ogni zona non sono documentate nell'API K-Sport pubblica.</div>
         </div>
       </div>
     </div>
   );
 }
 
-function LoadPage(){
-  const [playerId, setPlayerId] = useState('p1');
-  const player = PLAYERS.find(p=>p.id===playerId);
-  const acwrData = computeACWR(playerId).map(d => ({...d, x: d.label}));
-
+function LoadPage({sessions}){
+  if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione disponibile.</div>;
+  const acwrData = computeACWR(sessions).map(d => ({...d, x: d.label}));
   const last = acwrData[acwrData.length-1];
   const statusText = {
     ok: 'Carico in equilibrio, nessuna azione richiesta.',
-    warn: 'Zona di attenzione: monitorare la progressione del carico nei prossimi giorni.',
+    warn: 'Zona di attenzione: monitorare la progressione del carico nelle prossime sessioni.',
     danger: 'Rischio elevato: valutare una riduzione del carico o giorni di recupero.'
   };
   const statusBadge = {ok:'badge-ok', warn:'badge-warn', danger:'badge-danger'};
-
-  const monotonySessions = SESSIONS[playerId].slice(-7).filter(s=>s.duration>0);
-  const loadsWeek = monotonySessions.map(s=>s.playerLoad);
-  const meanLoad = loadsWeek.length ? loadsWeek.reduce((a,b)=>a+b,0)/loadsWeek.length : 0;
-  const sdLoad = loadsWeek.length ? Math.sqrt(loadsWeek.reduce((a,b)=>a+Math.pow(b-meanLoad,2),0)/loadsWeek.length) : 0;
-  const monotony = sdLoad > 0 ? +(meanLoad/sdLoad).toFixed(2) : 0;
-  const strain = Math.round(meanLoad * loadsWeek.length * monotony);
 
   return (
     <div>
       <div className="topbar">
         <div>
-          <h1 className="page-title">Gestione del carico</h1>
-          <div className="page-sub">Rapporto carico acuto:cronico (ACWR), monotonia e strain — per prevenzione infortuni</div>
-        </div>
-        <div className="controls">
-          <select value={playerId} onChange={e=>setPlayerId(e.target.value)}>
-            {PLAYERS.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <h1 className="page-title">Gestione del carico — {PLAYER_LABEL}</h1>
+          <div className="page-sub">ACWR calcolato sulla distanza per sessione (proxy di carico)</div>
         </div>
       </div>
 
@@ -870,101 +736,61 @@ function LoadPage(){
             {last.status==='ok'?'Ottimale':last.status==='warn'?'Attenzione':'Rischio alto'}
           </span>
         </div>
-        <KPICard label="Carico acuto (7gg, media)" value={fmt(last.acute)} unit="AU"/>
-        <KPICard label="Carico cronico (28gg, media)" value={fmt(last.chronic)} unit="AU"/>
-        <KPICard label="Monotonia settimanale" value={fmt(monotony,2)} unit={monotony>2?'⚠':''}/>
+        <KPICard label="Carico acuto (ultime 7 sessioni)" value={fmt(last.acute)} unit="m"/>
+        <KPICard label="Carico cronico (ultime 28 sessioni)" value={fmt(last.chronic)} unit="m"/>
+        <KPICard label="Sessioni analizzate" value={sessions.length} unit=""/>
       </div>
 
-      <div className="grid grid-3" style={{marginBottom:16}}>
-        <div className="card">
-          <div className="card-head"><div className="card-title">Andamento ACWR — {player.name}</div></div>
-          <TrendChart data={acwrData} xKey="x" unit="" yMin={0} yMax={2}
-            series={[{key:'acwr', name:'ACWR', color:player.color}]}
-            refBands={[{y1:0.8, y2:1.3, color:'#A6E22E', opacity:0.08}]}
-            refLines={[{y:1.5, color:'#E15B4E', label:'Rischio alto'}, {y:0.8, color:'#2A3A2E'}, {y:1.3, color:'#2A3A2E'}]}
-          />
-          <div className="legend-row">
-            <div className="legend-item"><span className="legend-swatch" style={{background:'rgba(166,226,46,0.4)'}}></span>Zona ottimale 0.8–1.3</div>
-            <div className="legend-item"><span className="legend-swatch" style={{background:'#E15B4E'}}></span>Soglia rischio 1.5</div>
-          </div>
-          <div className="section-note">{statusText[last.status]}</div>
+      <div className="card" style={{marginBottom:16}}>
+        <div className="card-head"><div className="card-title">Andamento ACWR</div></div>
+        <TrendChart data={acwrData} xKey="x" unit="" yMin={0} yMax={2}
+          series={[{key:'acwr', name:'ACWR', color:'#A6E22E'}]}
+          refBands={[{y1:0.8, y2:1.3, color:'#A6E22E', opacity:0.08}]}
+          refLines={[{y:1.5, color:'#E15B4E', label:'Rischio alto'}, {y:0.8, color:'#2A3A2E'}, {y:1.3, color:'#2A3A2E'}]}
+        />
+        <div className="legend-row">
+          <div className="legend-item"><span className="legend-swatch" style={{background:'rgba(166,226,46,0.4)'}}></span>Zona ottimale 0.8–1.3</div>
+          <div className="legend-item"><span className="legend-swatch" style={{background:'#E15B4E'}}></span>Soglia rischio 1.5</div>
         </div>
-
-        <div className="card">
-          <div className="card-head"><div className="card-title">Carico acuto vs cronico</div></div>
-          <TrendChart data={acwrData} xKey="x" area unit="AU"
-            series={[
-              {key:'chronic', name:'Cronico (28gg)', color:'#5FA8D3'},
-              {key:'acute', name:'Acuto (7gg)', color:'#A6E22E'},
-            ]}/>
-          <ChartLegend series={[{key:'chronic', name:'Cronico (28gg)', color:'#5FA8D3'},{key:'acute', name:'Acuto (7gg)', color:'#A6E22E'}]}/>
-          <div className="section-note">Strain settimanale stimato: <b style={{color:'var(--text-hi)'}}>{fmt(strain)}</b> AU. Valori di strain molto elevati, uniti ad alta monotonia, aumentano il rischio infortuni.</div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-head"><div className="card-title">Stato ACWR di tutta la rosa</div></div>
-        <table>
-          <thead><tr><th>Giocatore</th><th>ACWR</th><th>Acuto (7gg)</th><th>Cronico (28gg)</th><th>Stato</th></tr></thead>
-          <tbody>
-            {PLAYERS.map(p => {
-              const d = computeACWR(p.id);
-              const l = d[d.length-1];
-              return (
-                <tr key={p.id}>
-                  <td><div className="row-player"><div className="avatar" style={{background:p.color}}>{p.number}</div>{p.name}</div></td>
-                  <td className="num">{l.acwr}</td>
-                  <td className="num">{fmt(l.acute)}</td>
-                  <td className="num">{fmt(l.chronic)}</td>
-                  <td><span className={"badge " + statusBadge[l.status]}>{l.status==='ok'?'Ottimale':l.status==='warn'?'Attenzione':'Rischio alto'}</span></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="section-note">{statusText[last.status]} Le sessioni non sono equidistanti nel calendario (es. pause stagionali): le finestre acuta/cronica sono calcolate per numero di sessioni, non per giorni.</div>
       </div>
     </div>
   );
 }
 
-function RosterPage(){
-  const [playerId, setPlayerId] = useState('p1');
-  const player = PLAYERS.find(p=>p.id===playerId);
-  const sessions = SESSIONS[playerId].filter(s=>s.duration>0).slice(-10).reverse();
-
-  const zoneColors = {z1:'#4FA6E8', z2:'#4FD3B8', z3:'#A6E22E', z4:'#E8A33D', z5:'#E15B4E'};
-  const last = SESSIONS[playerId].filter(s=>s.duration>0).slice(-1)[0];
-  const totalZone = Object.values(last.zoneSpeed).reduce((a,b)=>a+b,0) || 1;
+function RosterPage({sessions}){
+  const [idx, setIdx] = useState(sessions.length-1);
+  if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione disponibile.</div>;
+  const s = sessions[idx];
+  const paramEntries = Object.entries(s.raw);
 
   return (
     <div>
       <div className="topbar">
         <div>
-          <h1 className="page-title">Rosa &amp; sessioni</h1>
-          <div className="page-sub">Storico dettagliato delle sessioni per singolo giocatore</div>
+          <h1 className="page-title">Storico &amp; parametri — {PLAYER_LABEL}</h1>
+          <div className="page-sub">Tutti i parametri grezzi restituiti dall'API K-Sport per la sessione selezionata</div>
         </div>
         <div className="controls">
-          <select value={playerId} onChange={e=>setPlayerId(e.target.value)}>
-            {PLAYERS.map(p=><option key={p.id} value={p.id}>{p.name} · {p.role}</option>)}
+          <select value={idx} onChange={e=>setIdx(Number(e.target.value))}>
+            {sessions.map((sess,i)=><option key={sess.sessionId} value={i}>{sess.label} — {sess.fullLabel}</option>)}
           </select>
         </div>
       </div>
 
       <div className="grid grid-3" style={{marginBottom:16}}>
         <div className="card">
-          <div className="card-head"><div className="card-title">Ultime 10 sessioni — {player.name}</div></div>
+          <div className="card-head"><div className="card-title">Storico sessioni caricate</div></div>
           <table>
-            <thead><tr><th>Giorno</th><th>Tipo</th><th>Durata</th><th>Distanza</th><th>Vel. max</th><th>Load</th><th>FC media</th></tr></thead>
+            <thead><tr><th>Sessione</th><th>Tipo</th><th>Distanza</th><th>Vel. max</th><th>Durata</th></tr></thead>
             <tbody>
-              {sessions.map(s => (
-                <tr key={s.date}>
-                  <td>{s.label}</td>
-                  <td style={{color:'var(--text-lo)'}}>{s.type}</td>
-                  <td className="num">{s.duration}'</td>
-                  <td className="num">{fmt(s.distance/1000,2)} km</td>
-                  <td className="num">{fmt(s.maxSpeed,1)} km/h</td>
-                  <td className="num">{fmt(s.playerLoad)}</td>
-                  <td className="num">{s.hrAvgPct}% FCmax</td>
+              {sessions.slice().reverse().map(sess => (
+                <tr key={sess.sessionId} style={sess.sessionId===s.sessionId?{background:'var(--pitch-100)'}:{}}>
+                  <td>{sess.label} <span style={{color:'var(--text-lo)'}}>· {sess.fullLabel}</span></td>
+                  <td style={{color:'var(--text-lo)'}}>{sess.isMatch ? 'Partita' : 'Allenamento'}</td>
+                  <td className="num">{fmt(sess.distance/1000,2)} km</td>
+                  <td className="num">{fmt(sess.maxSpeedKmh,1)} km/h</td>
+                  <td className="num">{fmt(sess.durationMin,0)} min</td>
                 </tr>
               ))}
             </tbody>
@@ -972,17 +798,19 @@ function RosterPage(){
         </div>
 
         <div className="card">
-          <div className="card-head"><div className="card-title">Fasce di velocità — ultima sessione</div></div>
-          <div className="zone-bar-wrap">
-            {Object.entries(last.zoneSpeed).map(([z,val]) => (
-              <div className="zone-row" key={z}>
-                <span style={{fontSize:12.5}}>{ {z1:'Z1 0-14',z2:'Z2 14-19',z3:'Z3 19-23',z4:'Z4 23-27',z5:'Z5 27+'}[z] } km/h</span>
-                <div className="zone-track"><div className="zone-fill" style={{width:((val/totalZone)*100)+'%', background:zoneColors[z]}}></div></div>
-                <span className="num" style={{fontSize:12.5}}>{fmt(val/1000,2)} km</span>
-              </div>
-            ))}
-          </div>
-          <div className="section-note">Distanza totale: {fmt(last.distance/1000,2)} km · {fmt(last.distancePerMin,1)} m/min di media</div>
+          <div className="card-head"><div className="card-title">Parametri grezzi — {s.label}</div></div>
+          <table>
+            <thead><tr><th>Codice</th><th>Descrizione</th><th>Valore</th></tr></thead>
+            <tbody>
+              {paramEntries.map(([code, value]) => (
+                <tr key={code}>
+                  <td className="num">{code}</td>
+                  <td style={{color:'var(--text-lo)', fontSize:12.5}}>{PARAM_LABELS[code] || '—'}</td>
+                  <td className="num">{typeof value === 'number' ? fmt(value,2) : String(value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -991,17 +819,32 @@ function RosterPage(){
 
 function App(){
   const [page, setPage] = useState('overview');
-  const pages = {
-    overview: <OverviewPage/>,
-    'compare-players': <ComparePlayersPage/>,
-    'compare-days': <CompareDaysPage/>,
-    load: <LoadPage/>,
-    roster: <RosterPage/>,
-  };
+  const [sessions, setSessions] = useState(null);
+  const [error, setError] = useState(null);
+
+  React.useEffect(() => {
+    loadGirondaSessions().then(setSessions).catch(e => setError(e.message));
+  }, []);
+
+  let content;
+  if(error){
+    content = <ErrorState message={error}/>;
+  } else if(sessions === null){
+    content = <LoadingState/>;
+  } else {
+    const pages = {
+      overview: <OverviewPage sessions={sessions}/>,
+      'compare-days': <CompareDaysPage sessions={sessions}/>,
+      load: <LoadPage sessions={sessions}/>,
+      roster: <RosterPage sessions={sessions}/>,
+    };
+    content = pages[page];
+  }
+
   return (
     <div className="app">
       <Sidebar page={page} setPage={setPage}/>
-      <div className="main">{pages[page]}</div>
+      <div className="main">{content}</div>
     </div>
   );
 }
