@@ -919,14 +919,21 @@ const generateAiComment = (data) => apiCall('/api/ai-comment', {
 });
 
 const loadGymSheets = (playerName) => apiCall(`/api/gym-sheets?playerName=${encodeURIComponent(playerName)}`);
-const createNewSheet = (playerName, title) => apiCall('/api/gym-sheets', {
-  method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playerName, title})
+const createNewSheet = (playerName, title, startDate) => apiCall('/api/gym-sheets', {
+  method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playerName, title, startDate})
+});
+const updateSheet = (id, data) => apiCall('/api/gym-sheets', {
+  method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id, ...data})
 });
 const deleteSheet = (id) => apiCall(`/api/gym-sheets?id=${id}`, { method:'DELETE' });
 const addExercise = (data) => apiCall('/api/gym-exercises', {
   method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
 });
+const updateExercise = (id, data) => apiCall('/api/gym-exercises', {
+  method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id, ...data})
+});
 const deleteExercise = (id) => apiCall(`/api/gym-exercises?id=${id}`, { method:'DELETE' });
+
 
 const loadDocuments = (playerName) => apiCall(`/api/documents?playerName=${encodeURIComponent(playerName)}`).then(r => r.Documents || []);
 const uploadDocument = (data) => apiCall('/api/documents', {
@@ -959,7 +966,7 @@ async function loadUnifiedPlayers(){
 
 function Sidebar({page, setPage}){
   const items = [
-    {id:'performance', label:'Performance'},
+    {id:'performance', label:'Area Performance'},
     {id:'medica', label:'Area Medica'},
     {id:'strength', label:'Area Strength'},
     {id:'timeline', label:'Timeline'},
@@ -1544,7 +1551,7 @@ function PerformancePage(){
     <div>
       <div className="topbar">
         <div>
-          <h1 className="page-title">Performance</h1>
+          <h1 className="page-title">Area Performance</h1>
           <div className="page-sub">Dati GPS K-Sport — vista squadra o singolo giocatore</div>
         </div>
         <ScopeToggle scope={scope} setScope={setScope}/>
@@ -2416,28 +2423,63 @@ function ExerciseForm({sheetId, onAdded}){
   );
 }
 
-function ExerciseTable({exercises, onDeleted, editable}){
+function ExerciseTable({exercises, onDeleted, onUpdated, editable}){
   const [openVideo, setOpenVideo] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [draft, setDraft] = useState({});
+
   if(exercises.length === 0) return <div className="empty-hint">Nessun esercizio in questa scheda.</div>;
+
+  const inputStyle = {background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'5px 7px', borderRadius:5, fontSize:12, width:'100%'};
+
+  const startEdit = (ex) => {
+    setEditingId(ex.id);
+    setDraft({ exerciseName: ex.exercise_name, youtubeUrl: ex.youtube_url||'', kg: ex.kg||'', reps: ex.reps||'', recovery: ex.recovery||'', notes: ex.notes||'' });
+  };
+  const saveEdit = async () => {
+    await onUpdated(editingId, draft);
+    setEditingId(null);
+  };
+
   return (
     <table>
       <thead><tr><th>Esercizio</th><th>Video</th><th>Kg</th><th>Reps</th><th>Recupero</th><th>Note</th>{editable && <th></th>}</tr></thead>
       <tbody>
         {exercises.map(ex => (
           <React.Fragment key={ex.id}>
-            <tr>
-              <td>{ex.exercise_name}</td>
-              <td>{ex.youtube_url ? (
-                <button onClick={()=>setOpenVideo(openVideo===ex.id?null:ex.id)} className="pill-btn" style={{cursor:'pointer', fontSize:11, padding:'3px 8px'}}>
-                  {openVideo===ex.id ? 'Chiudi' : '▶ Video'}
-                </button>
-              ) : '—'}</td>
-              <td className="num">{ex.kg ? fmt(Number(ex.kg),1) : '—'}</td>
-              <td className="num">{ex.reps || '—'}</td>
-              <td className="num">{ex.recovery || '—'}</td>
-              <td style={{color:'var(--text-lo)', fontSize:11.5}}>{ex.notes || '—'}</td>
-              {editable && <td><button onClick={()=>onDeleted(ex.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12, cursor:'pointer'}}>✕</button></td>}
-            </tr>
+            {editingId === ex.id ? (
+              <tr>
+                <td><input style={inputStyle} value={draft.exerciseName} onChange={e=>setDraft(d=>({...d, exerciseName:e.target.value}))}/></td>
+                <td><input style={inputStyle} placeholder="link YouTube" value={draft.youtubeUrl} onChange={e=>setDraft(d=>({...d, youtubeUrl:e.target.value}))}/></td>
+                <td><input style={inputStyle} value={draft.kg} onChange={e=>setDraft(d=>({...d, kg:e.target.value}))}/></td>
+                <td><input style={inputStyle} value={draft.reps} onChange={e=>setDraft(d=>({...d, reps:e.target.value}))}/></td>
+                <td><input style={inputStyle} value={draft.recovery} onChange={e=>setDraft(d=>({...d, recovery:e.target.value}))}/></td>
+                <td><input style={inputStyle} value={draft.notes} onChange={e=>setDraft(d=>({...d, notes:e.target.value}))}/></td>
+                <td style={{display:'flex', gap:4}}>
+                  <button onClick={saveEdit} style={{background:'transparent', border:'none', color:'var(--lime)', fontSize:12, cursor:'pointer'}}>✓</button>
+                  <button onClick={()=>setEditingId(null)} style={{background:'transparent', border:'none', color:'var(--text-lo)', fontSize:12, cursor:'pointer'}}>✕</button>
+                </td>
+              </tr>
+            ) : (
+              <tr>
+                <td>{ex.exercise_name}</td>
+                <td>{ex.youtube_url ? (
+                  <button onClick={()=>setOpenVideo(openVideo===ex.id?null:ex.id)} className="pill-btn" style={{cursor:'pointer', fontSize:11, padding:'3px 8px'}}>
+                    {openVideo===ex.id ? 'Chiudi' : '▶ Video'}
+                  </button>
+                ) : '—'}</td>
+                <td className="num">{ex.kg ? fmt(Number(ex.kg),1) : '—'}</td>
+                <td className="num">{ex.reps || '—'}</td>
+                <td className="num">{ex.recovery || '—'}</td>
+                <td style={{color:'var(--text-lo)', fontSize:11.5}}>{ex.notes || '—'}</td>
+                {editable && (
+                  <td style={{display:'flex', gap:8}}>
+                    <button onClick={()=>startEdit(ex)} style={{background:'transparent', border:'none', color:'var(--lime)', fontSize:12, cursor:'pointer'}}>✎</button>
+                    <button onClick={()=>onDeleted(ex.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12, cursor:'pointer'}}>✕</button>
+                  </td>
+                )}
+              </tr>
+            )}
             {openVideo===ex.id && youtubeEmbedUrl(ex.youtube_url) && (
               <tr><td colSpan={editable?7:6}>
                 <iframe width="100%" height="280" src={youtubeEmbedUrl(ex.youtube_url)} title={ex.exercise_name}
@@ -2618,8 +2660,15 @@ function PlayerGymSheetPanel({playerName}){
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [openHistoryId, setOpenHistoryId] = useState(null);
+  const [editingDates, setEditingDates] = useState(false);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
-  const refresh = () => loadGymSheets(playerName).then(setData).catch(e=>setError(e.message));
+  const refresh = () => loadGymSheets(playerName).then(d => {
+    setData(d);
+    setStartDate(d.current.start_date ? d.current.start_date.slice(0,10) : '');
+    setEndDate(d.current.end_date ? d.current.end_date.slice(0,10) : '');
+  }).catch(e=>setError(e.message));
   React.useEffect(() => { setData(null); refresh(); }, [playerName]);
 
   const handleNewSheet = async () => {
@@ -2628,50 +2677,83 @@ function PlayerGymSheetPanel({playerName}){
   const handleDeleteExercise = async (id) => {
     try{ await deleteExercise(id); refresh(); } catch(err){ setError(err.message); }
   };
+  const handleUpdateExercise = async (id, draft) => {
+    try{ await updateExercise(id, draft); refresh(); } catch(err){ setError(err.message); }
+  };
   const handleDeleteSheet = async (id) => {
     try{ await deleteSheet(id); refresh(); } catch(err){ setError(err.message); }
+  };
+  const handleSaveDates = async () => {
+    try{ await updateSheet(data.current.id, { startDate: startDate||null, endDate: endDate||null }); setEditingDates(false); refresh(); } catch(err){ setError(err.message); }
   };
 
   if(error) return <ErrorState message={error}/>;
   if(data === null) return <LoadingState/>;
 
   return (
-    <div>
-      <div className="card" style={{marginBottom:16}}>
-        <div className="card-head">
-          <div className="card-title">Scheda corrente — {data.current.title}</div>
-          <button onClick={handleNewSheet} className="pill-btn" style={{cursor:'pointer'}}>+ Nuova scheda</button>
-        </div>
-        <ExerciseForm sheetId={data.current.id} onAdded={refresh}/>
-        <ExerciseTable exercises={data.current.exercises} onDeleted={handleDeleteExercise} editable/>
-      </div>
-
+    <div style={{display:'grid', gridTemplateColumns:'260px 1fr', gap:16, alignItems:'start'}}>
+      {/* Colonna sinistra: storico schede, visivamente distinto */}
       <div className="card">
-        <div className="card-head"><div className="card-title">Storico schede ({data.history.length})</div></div>
+        <div className="card-head"><div className="card-title">Schede precedenti ({data.history.length})</div></div>
         {data.history.length === 0 ? <div className="empty-hint">Nessuna scheda precedente.</div> : (
           <div style={{display:'flex', flexDirection:'column', gap:8}}>
             {data.history.map(sheet => (
-              <div key={sheet.id} className="card" style={{background:'var(--pitch-100)'}}>
-                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer'}}
-                  onClick={()=>setOpenHistoryId(openHistoryId===sheet.id?null:sheet.id)}>
-                  <div>
-                    <b style={{fontSize:13}}>{sheet.title}</b>
-                    <span style={{color:'var(--text-lo)', fontSize:11.5, marginLeft:8}}>
-                      {new Date(sheet.created_at).toLocaleDateString('it-IT')} · {sheet.exercises.length} esercizi
-                    </span>
+              <div key={sheet.id} className="card" style={{background:'var(--pitch-100)', padding:'10px 12px'}}>
+                <div style={{cursor:'pointer'}} onClick={()=>setOpenHistoryId(openHistoryId===sheet.id?null:sheet.id)}>
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                    <b style={{fontSize:12.5}}>{sheet.title}</b>
+                    <span style={{fontSize:10.5, color:'var(--text-lo)'}}>{openHistoryId===sheet.id ? '▲' : '▼'}</span>
                   </div>
-                  <div style={{display:'flex', gap:10, alignItems:'center'}}>
-                    <span style={{fontSize:11, color:'var(--text-lo)'}}>{openHistoryId===sheet.id ? '▲' : '▼'}</span>
-                    <button onClick={(e)=>{e.stopPropagation(); handleDeleteSheet(sheet.id);}} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:11.5, cursor:'pointer'}}>Elimina</button>
+                  <div style={{color:'var(--text-lo)', fontSize:11, marginTop:3}}>
+                    {sheet.start_date ? new Date(sheet.start_date).toLocaleDateString('it-IT') : '—'}
+                    {' → '}
+                    {sheet.end_date ? new Date(sheet.end_date).toLocaleDateString('it-IT') : 'in corso'}
                   </div>
+                  <div style={{color:'var(--text-lo)', fontSize:11}}>{sheet.exercises.length} esercizi</div>
                 </div>
                 {openHistoryId===sheet.id && (
-                  <div style={{marginTop:10}}><ExerciseTable exercises={sheet.exercises} editable={false}/></div>
+                  <React.Fragment>
+                    <div style={{marginTop:8, overflowX:'auto'}}><ExerciseTable exercises={sheet.exercises} editable={false}/></div>
+                    <button onClick={()=>handleDeleteSheet(sheet.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:11, cursor:'pointer', marginTop:6}}>Elimina scheda</button>
+                  </React.Fragment>
                 )}
               </div>
             ))}
           </div>
         )}
+      </div>
+
+      {/* Colonna destra: scheda corrente, in primo piano */}
+      <div className="card" style={{borderColor:'var(--lime)'}}>
+        <div className="card-head">
+          <div className="card-title">Scheda corrente — {data.current.title}</div>
+          <button onClick={handleNewSheet} className="pill-btn" style={{cursor:'pointer'}}>+ Nuova scheda</button>
+        </div>
+
+        <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap'}}>
+          {editingDates ? (
+            <React.Fragment>
+              <span style={{fontSize:12, color:'var(--text-lo)'}}>Da</span>
+              <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}
+                style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'6px 9px', borderRadius:6, fontSize:12.5}}/>
+              <span style={{fontSize:12, color:'var(--text-lo)'}}>a</span>
+              <input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)}
+                style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'6px 9px', borderRadius:6, fontSize:12.5}}/>
+              <button onClick={handleSaveDates} className="pill-btn on" style={{cursor:'pointer', fontSize:12}}>Salva</button>
+              <button onClick={()=>setEditingDates(false)} className="pill-btn" style={{cursor:'pointer', fontSize:12}}>Annulla</button>
+            </React.Fragment>
+          ) : (
+            <React.Fragment>
+              <span style={{fontSize:12.5, color:'var(--text-lo)'}}>
+                Periodo: {startDate ? new Date(startDate).toLocaleDateString('it-IT') : '—'} → {endDate ? new Date(endDate).toLocaleDateString('it-IT') : 'in corso'}
+              </span>
+              <button onClick={()=>setEditingDates(true)} className="pill-btn" style={{cursor:'pointer', fontSize:11.5}}>✎ Modifica periodo</button>
+            </React.Fragment>
+          )}
+        </div>
+
+        <ExerciseForm sheetId={data.current.id} onAdded={refresh}/>
+        <ExerciseTable exercises={data.current.exercises} onDeleted={handleDeleteExercise} onUpdated={handleUpdateExercise} editable/>
       </div>
     </div>
   );
