@@ -940,6 +940,9 @@ const uploadDocument = (data) => apiCall('/api/documents', {
   method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
 });
 const deleteDocument = (id) => apiCall(`/api/documents?id=${id}`, { method:'DELETE' });
+const analyzeDocument = (id) => apiCall('/api/documents', {
+  method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})
+});
 
 const INJURY_TYPES = ['Muscolare', 'Articolare/Legamentoso', 'Osseo', 'Tendineo', 'Altro'];
 const loadTeamInjuries = () => apiCall('/api/injuries').then(r => r.Injuries || []);
@@ -1240,6 +1243,7 @@ function DocumentsPanel({playerName}){
   const [title, setTitle] = useState('');
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(null);
 
   const refresh = () => loadDocuments(playerName).then(setDocs).catch(e=>setError(e.message));
   React.useEffect(() => { refresh(); }, [playerName]);
@@ -1250,7 +1254,7 @@ function DocumentsPanel({playerName}){
     setUploading(true);
     try{
       const fileBase64 = await fileToBase64(file);
-      await uploadDocument({ playerName, docType, title: title.trim(), fileBase64, fileName: file.name });
+      await uploadDocument({ playerName, docType, title: title.trim(), fileBase64, fileName: file.name, mimeType: file.type });
       setTitle(''); setFile(null);
       refresh();
     } catch(err){ setError(err.message); }
@@ -1259,6 +1263,12 @@ function DocumentsPanel({playerName}){
 
   const handleDelete = async (id) => {
     try{ await deleteDocument(id); refresh(); } catch(err){ setError(err.message); }
+  };
+
+  const handleAnalyze = async (id) => {
+    setAnalyzing(id);
+    try{ await analyzeDocument(id); refresh(); } catch(err){ setError(err.message); }
+    setAnalyzing(null);
   };
 
   return (
@@ -1271,25 +1281,37 @@ function DocumentsPanel({playerName}){
         </select>
         <input placeholder="Titolo (opzionale)" value={title} onChange={e=>setTitle(e.target.value)}
           style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'7px 10px', borderRadius:6, fontSize:12.5}}/>
-        <input type="file" accept="application/pdf" onChange={e=>setFile(e.target.files[0]||null)} style={{fontSize:12.5}}/>
+        <input type="file" accept="application/pdf,image/*" onChange={e=>setFile(e.target.files[0]||null)} style={{fontSize:12.5}}/>
         <button type="submit" disabled={!file || uploading} className="pill-btn on" style={{cursor:'pointer'}}>
-          {uploading ? 'Caricamento…' : 'Carica PDF'}
+          {uploading ? 'Caricamento…' : 'Carica documento'}
         </button>
-        <div className="section-note">Limite 4 MB per file.</div>
+        <div className="section-note">PDF o immagine (foto/screenshot). Limite 4 MB per file.</div>
       </form>
 
       {docs === null ? <div className="empty-hint">Caricamento…</div> :
        docs.length === 0 ? <div className="empty-hint">Nessun documento caricato ancora.</div> :
-       <div style={{display:'flex', flexDirection:'column', gap:6}}>
+       <div style={{display:'flex', flexDirection:'column', gap:8}}>
          {docs.map(d => (
-           <div key={d.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'7px 10px', background:'var(--pitch-100)', borderRadius:6}}>
-             <div>
-               <a href={d.blob_url} target="_blank" rel="noreferrer" style={{color:'var(--lime)', fontSize:12.5, textDecoration:'none'}}>{d.title || 'Documento'}</a>
-               <span style={{color:'var(--text-lo)', fontSize:11, marginLeft:8}}>
-                 {DOC_TYPES.find(t=>t.value===d.doc_type)?.label || d.doc_type} · {new Date(d.uploaded_at).toLocaleDateString('it-IT')}
-               </span>
+           <div key={d.id} style={{padding:'9px 10px', background:'var(--pitch-100)', borderRadius:6}}>
+             <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+               <div>
+                 <a href={d.blob_url} target="_blank" rel="noreferrer" style={{color:'var(--lime)', fontSize:12.5, textDecoration:'none'}}>{d.title || 'Documento'}</a>
+                 <span style={{color:'var(--text-lo)', fontSize:11, marginLeft:8}}>
+                   {DOC_TYPES.find(t=>t.value===d.doc_type)?.label || d.doc_type} · {new Date(d.uploaded_at).toLocaleDateString('it-IT')}
+                   {d.mime_type && d.mime_type.startsWith('image') ? ' · immagine' : ' · PDF'}
+                 </span>
+               </div>
+               <button onClick={()=>handleDelete(d.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12, cursor:'pointer'}}>✕</button>
              </div>
-             <button onClick={()=>handleDelete(d.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12, cursor:'pointer'}}>✕</button>
+             {d.ai_summary ? (
+               <div className="section-note" style={{marginTop:8, padding:9, background:'var(--pitch-200)', borderRadius:6}}>
+                 <b style={{color:'var(--lime)'}}>Sintesi AI:</b> {d.ai_summary}
+               </div>
+             ) : (
+               <button onClick={()=>handleAnalyze(d.id)} disabled={analyzing===d.id} className="pill-btn" style={{marginTop:8, cursor:'pointer', fontSize:11.5}}>
+                 {analyzing===d.id ? 'Analisi in corso…' : 'Analizza con IA'}
+               </button>
+             )}
            </div>
          ))}
        </div>
