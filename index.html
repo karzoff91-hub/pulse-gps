@@ -1,0 +1,2638 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pulse — GPS Performance Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<style>
+  :root{
+    --pitch-000:#0B120D;
+    --pitch-050:#0F1810;
+    --pitch-100:#141F16;
+    --pitch-200:#1C2A1F;
+    --line:#2A3A2E;
+    --text-hi:#EFF3EC;
+    --text-lo:#8FA091;
+    --lime:#A6E22E;
+    --lime-dim:#5C7A2E;
+    --amber:#E8A33D;
+    --red:#E15B4E;
+    --blue:#5FA8D3;
+    --violet:#9B8CE8;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{background:var(--pitch-000); color:var(--text-hi); font-family:'Barlow',sans-serif; height:100%;}
+  #root{min-height:100vh;}
+  ::selection{background:var(--lime); color:var(--pitch-000);}
+  h1,h2,h3,.display{font-family:'Barlow Condensed',sans-serif; font-weight:700; letter-spacing:0.2px;}
+  .num{font-variant-numeric: tabular-nums;}
+  button{font-family:inherit; cursor:pointer;}
+  a{color:inherit;}
+
+  .app{display:flex; min-height:100vh;}
+
+  /* Sidebar */
+  .sidebar{
+    width:230px; flex-shrink:0; background:var(--pitch-050);
+    border-right:1px solid var(--line); padding:28px 18px;
+    display:flex; flex-direction:column; gap:6px;
+    position:sticky; top:0; height:100vh;
+  }
+  .brand{display:flex; align-items:baseline; gap:8px; padding:0 10px 26px 10px; border-bottom:1px solid var(--line); margin-bottom:18px;}
+  .brand-mark{width:11px; height:11px; background:var(--lime); border-radius:2px; transform:rotate(45deg); flex-shrink:0;}
+  .brand-name{font-family:'Barlow Condensed'; font-weight:800; font-size:22px; letter-spacing:0.5px;}
+  .brand-sub{font-size:11px; color:var(--text-lo);}
+
+  .nav-item{
+    display:flex; align-items:center; gap:11px;
+    padding:11px 12px; border-radius:6px; color:var(--text-lo);
+    font-size:15px; font-weight:500; border:none; background:transparent; text-align:left; width:100%;
+    transition: background 0.15s, color 0.15s;
+  }
+  .nav-item:hover{background:var(--pitch-100); color:var(--text-hi);}
+  .nav-item.active{background:var(--pitch-200); color:var(--lime);}
+  .nav-dot{width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7; flex-shrink:0;}
+
+  .sidebar-foot{margin-top:auto; padding:14px 12px 0 12px; border-top:1px solid var(--line); font-size:12px; color:var(--text-lo); line-height:1.5;}
+
+  /* Mobile menu button */
+  .menu-btn{display:none;}
+
+  /* Main */
+  .main{flex:1; min-width:0; padding:30px 40px 60px 40px;}
+  .topbar{display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:26px; gap:20px; flex-wrap:wrap;}
+  .page-title{font-size:26px; line-height:1;}
+  .page-sub{color:var(--text-lo); font-size:14.5px; margin-top:6px;}
+
+  .controls{display:flex; gap:10px; flex-wrap:wrap;}
+  select, .pill-btn{
+    background:var(--pitch-100); border:1px solid var(--line); color:var(--text-hi);
+    padding:9px 14px; border-radius:7px; font-size:13.5px; font-weight:500;
+  }
+  select:focus{outline:1px solid var(--lime);}
+
+  /* Grid + cards */
+  .grid{display:grid; gap:16px;}
+  .grid-4{grid-template-columns:repeat(4,1fr);}
+  .grid-3{grid-template-columns:2fr 1fr;}
+  .grid-2{grid-template-columns:1fr 1fr;}
+  @media(max-width:1000px){ .grid-4{grid-template-columns:repeat(2,1fr);} .grid-3{grid-template-columns:1fr;} .grid-2{grid-template-columns:1fr;} }
+
+  .card{
+    background:var(--pitch-050); border:1px solid var(--line); border-radius:10px;
+    padding:14px 16px;
+  }
+  .card-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;}
+  .card-title{font-size:11.5px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-lo); font-weight:600;}
+
+  .kpi-card .kpi-value{font-family:'Barlow Condensed'; font-size:26px; font-weight:700; line-height:1;}
+  .kpi-card .kpi-label{color:var(--text-lo); font-size:11.5px; margin-top:4px;}
+  .kpi-card .kpi-delta{font-size:12.5px; margin-top:10px; display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:20px;}
+  .kpi-up{background:rgba(166,226,46,0.12); color:var(--lime);}
+  .kpi-down{background:rgba(225,91,78,0.12); color:var(--red);}
+  .kpi-flat{background:rgba(143,160,145,0.12); color:var(--text-lo);}
+
+  table{width:100%; border-collapse:collapse; font-size:12.5px;}
+  th{text-align:left; color:var(--text-lo); font-weight:600; font-size:10.5px; text-transform:uppercase; letter-spacing:0.05em; padding:6px 8px; border-bottom:1px solid var(--line);}
+  td{padding:7px 8px; border-bottom:1px solid var(--pitch-100);}
+  tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:var(--pitch-100);}
+  .row-player{display:flex; align-items:center; gap:10px;}
+  .avatar{width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; font-family:'Barlow Condensed'; color:var(--pitch-000); flex-shrink:0;}
+
+  .badge{padding:3px 9px; border-radius:20px; font-size:12px; font-weight:600; display:inline-block;}
+  .badge-ok{background:rgba(166,226,46,0.14); color:var(--lime);}
+  .badge-warn{background:rgba(232,163,61,0.16); color:var(--amber);}
+  .badge-danger{background:rgba(225,91,78,0.16); color:var(--red);}
+
+  .legend-row{display:flex; gap:16px; flex-wrap:wrap; margin-top:12px;}
+  .legend-item{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text-lo);}
+  .legend-swatch{width:10px; height:10px; border-radius:2px;}
+
+  .chip-row{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:4px;}
+  .chip{
+    padding:7px 13px; border-radius:20px; font-size:13px; font-weight:500;
+    border:1px solid var(--line); background:var(--pitch-100); color:var(--text-lo);
+  }
+  .chip.on{border-color: var(--player-color, var(--lime)); color:var(--text-hi); background:var(--pitch-200);}
+  .chip-swatch{width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:7px;}
+
+  .empty-hint{color:var(--text-lo); font-size:13.5px; padding:30px 0; text-align:center;}
+
+  .zone-bar-wrap{display:flex; flex-direction:column; gap:9px;}
+  .zone-row{display:grid; grid-template-columns:120px 1fr 60px; align-items:center; gap:10px; font-size:13px;}
+  .zone-track{height:9px; background:var(--pitch-100); border-radius:5px; overflow:hidden;}
+  .zone-fill{height:100%; border-radius:5px;}
+
+  .section-note{font-size:12.5px; color:var(--text-lo); line-height:1.6; margin-top:8px;}
+
+  /* Chart primitives */
+  .chart-wrap{position:relative; width:100%;}
+  .chart-svg{width:100%; height:auto; display:block; overflow:visible;}
+  .chart-tooltip{
+    position:absolute; pointer-events:none; background:var(--pitch-200); border:1px solid var(--line);
+    padding:9px 12px; border-radius:8px; font-size:12.5px; transform:translate(-50%,-108%);
+    white-space:nowrap; z-index:5; box-shadow:0 6px 18px rgba(0,0,0,0.35);
+  }
+  .chart-tooltip .t-label{color:var(--text-lo); margin-bottom:4px; font-size:11px; text-transform:uppercase; letter-spacing:0.05em;}
+  .chart-tooltip .t-row{display:flex; justify-content:space-between; gap:16px;}
+
+  ::-webkit-scrollbar{width:9px; height:9px;}
+  ::-webkit-scrollbar-track{background:var(--pitch-050);}
+  ::-webkit-scrollbar-thumb{background:var(--line); border-radius:5px;}
+</style>
+</head>
+<body>
+<div id="root"><div style="padding:40px;font-family:sans-serif;color:#8FA091;background:#0B120D;min-height:100vh;">Caricamento di Pulse in corso…</div></div>
+
+<script>
+  window.addEventListener('error', function(e){
+    var root = document.getElementById('root');
+    if(root && !root.dataset.mounted){
+      root.innerHTML = '<div style="padding:40px;font-family:sans-serif;color:#E15B4E;background:#0B120D;min-height:100vh;">Errore nel caricamento: ' + (e.message||'sconosciuto') + '. Prova a ricaricare la pagina o ad aprirla con un altro browser.</div>';
+    }
+  });
+</script>
+
+<script type="text/babel" data-presets="react,env">
+const {useState, useMemo, useRef} = React;
+
+/* =================================================================
+   CHART PRIMITIVES — SVG puro, nessuna libreria esterna
+   ================================================================= */
+
+const VB_W = 640, VB_H_DEFAULT = 200;
+const PAD = {top:14, right:16, bottom:28, left:44};
+
+function niceTicks(min, max, count){
+  if(min === max){ min -= 1; max += 1; }
+  const range = max - min;
+  const step = range / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(step)));
+  const norm = step / mag;
+  let niceStep;
+  if(norm < 1.5) niceStep = 1*mag;
+  else if(norm < 3) niceStep = 2*mag;
+  else if(norm < 7) niceStep = 5*mag;
+  else niceStep = 10*mag;
+  const niceMin = Math.floor(min/niceStep)*niceStep;
+  const niceMax = Math.ceil(max/niceStep)*niceStep;
+  const ticks = [];
+  for(let v=niceMin; v<=niceMax+1e-9; v+=niceStep) ticks.push(+v.toFixed(6));
+  return ticks;
+}
+
+function fmtNum(n, d=0){
+  if(n === null || n === undefined || Number.isNaN(n)) return '—';
+  return n.toLocaleString('it-IT', {minimumFractionDigits:d, maximumFractionDigits:d});
+}
+
+/* Multi-series line/area chart with hover tooltip, reference bands/lines */
+function TrendChart({data, xKey, series, height=VB_H_DEFAULT, area=false, unit='', yMin, yMax, refBands=[], refLines=[]}){
+  const wrapRef = useRef(null);
+  const [hover, setHover] = useState(null);
+  const w = VB_W, h = height;
+  const plotW = w - PAD.left - PAD.right;
+  const plotH = h - PAD.top - PAD.bottom;
+
+  const allVals = data.flatMap(d => series.map(s => d[s.key])).filter(v => typeof v === 'number');
+  const dataMin = allVals.length ? Math.min(...allVals) : 0;
+  const dataMax = allVals.length ? Math.max(...allVals) : 1;
+  const lo = yMin !== undefined ? yMin : Math.min(dataMin, 0);
+  const hi = yMax !== undefined ? yMax : dataMax;
+  const ticks = niceTicks(lo, hi, 4);
+  const yLo = ticks[0], yHi = ticks[ticks.length-1];
+
+  const n = data.length;
+  const xPos = (i) => n <= 1 ? PAD.left + plotW/2 : PAD.left + (i/(n-1))*plotW;
+  const yPos = (v) => PAD.top + plotH - ((v - yLo)/((yHi-yLo)||1))*plotH;
+
+  const labelEvery = Math.max(1, Math.ceil(n / 8));
+
+  const handleMove = (e) => {
+    const svg = e.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    const relX = (e.clientX - rect.left) / rect.width * w;
+    let idx = n<=1 ? 0 : Math.round(((relX - PAD.left)/plotW)*(n-1));
+    idx = Math.max(0, Math.min(n-1, idx));
+    setHover(idx);
+  };
+
+  return (
+    <div className="chart-wrap" ref={wrapRef}>
+      <svg className="chart-svg" viewBox={`0 0 ${w} ${h}`} onMouseMove={handleMove} onMouseLeave={()=>setHover(null)}>
+        {ticks.map((t,i) => (
+          <g key={i}>
+            <line x1={PAD.left} x2={w-PAD.right} y1={yPos(t)} y2={yPos(t)} stroke="#1C2A1F" strokeWidth="1"/>
+            <text x={PAD.left-8} y={yPos(t)+4} fill="#8FA091" fontSize="11" textAnchor="end">{fmtNum(t)}</text>
+          </g>
+        ))}
+        {refBands.map((b,i) => (
+          <rect key={'b'+i} x={PAD.left} y={yPos(b.y2)} width={plotW} height={Math.max(0,yPos(b.y1)-yPos(b.y2))} fill={b.color||'#A6E22E'} opacity={b.opacity||0.08}/>
+        ))}
+        {refLines.map((r,i) => (
+          <g key={'r'+i}>
+            <line x1={PAD.left} x2={w-PAD.right} y1={yPos(r.y)} y2={yPos(r.y)} stroke={r.color||'#E15B4E'} strokeWidth="1.4" strokeDasharray="5 4"/>
+            {r.label && <text x={w-PAD.right} y={yPos(r.y)-5} fill={r.color||'#E15B4E'} fontSize="10.5" textAnchor="end">{r.label}</text>}
+          </g>
+        ))}
+        {data.map((d,i) => (i % labelEvery === 0 || i === n-1) && (
+          <text key={'x'+i} x={xPos(i)} y={h-8} fill="#8FA091" fontSize="10.5" textAnchor="middle">{d[xKey]}</text>
+        ))}
+        {series.map(s => {
+          const pts = data.map((d,i) => [xPos(i), yPos(d[s.key])]);
+          const linePath = pts.map((p,i) => (i===0?'M':'L')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+          const areaPath = area ? linePath + ` L${pts[pts.length-1][0].toFixed(1)},${yPos(yLo).toFixed(1)} L${pts[0][0].toFixed(1)},${yPos(yLo).toFixed(1)} Z` : null;
+          const gid = 'grad-'+s.key.replace(/[^a-zA-Z0-9]/g,'');
+          return (
+            <g key={s.key}>
+              {area && <defs>
+                <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={s.color} stopOpacity="0.32"/>
+                  <stop offset="100%" stopColor={s.color} stopOpacity="0"/>
+                </linearGradient>
+              </defs>}
+              {area && <path d={areaPath} fill={`url(#${gid})`} stroke="none"/>}
+              <path d={linePath} fill="none" stroke={s.color} strokeWidth="2.3" strokeLinejoin="round" strokeLinecap="round"/>
+              {n <= 30 && pts.map((p,i) => <circle key={i} cx={p[0]} cy={p[1]} r="2.6" fill={s.color}/>)}
+            </g>
+          );
+        })}
+        {hover !== null && (
+          <line x1={xPos(hover)} x2={xPos(hover)} y1={PAD.top} y2={h-PAD.bottom} stroke="#8FA091" strokeWidth="1" strokeDasharray="3 3"/>
+        )}
+      </svg>
+      {hover !== null && (
+        <div className="chart-tooltip" style={{left: (xPos(hover)/w*100)+'%', top: (PAD.top/h*100)+'%'}}>
+          <div className="t-label">{data[hover][xKey]}</div>
+          {series.map(s => (
+            <div className="t-row" key={s.key}>
+              <span style={{color:s.color}}>{s.name}</span>
+              <span className="num">&nbsp;{fmtNum(data[hover][s.key], unit==='km'?1:0)} {unit}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Grouped bar chart, 2 series */
+function BarChart2({data, xKey, series, height=VB_H_DEFAULT, unit='', refLine}){
+  const [hover, setHover] = useState(null);
+  const w = VB_W, h = height;
+  const plotW = w - PAD.left - PAD.right;
+  const plotH = h - PAD.top - PAD.bottom;
+  const allVals = data.flatMap(d => series.map(s => d[s.key]));
+  const maxV = Math.max(...allVals, refLine?.value||0, 1);
+  const ticks = niceTicks(0, maxV, 4);
+  const yHi = ticks[ticks.length-1];
+  const yPos = (v) => PAD.top + plotH - (v/(yHi||1))*plotH;
+
+  const n = data.length;
+  const groupW = plotW / n;
+  const barW = Math.min(26, groupW*0.32);
+  const gap = 6;
+
+  return (
+    <div className="chart-wrap">
+      <svg className="chart-svg" viewBox={`0 0 ${w} ${h}`}>
+        {ticks.map((t,i) => (
+          <g key={i}>
+            <line x1={PAD.left} x2={w-PAD.right} y1={yPos(t)} y2={yPos(t)} stroke="#1C2A1F" strokeWidth="1"/>
+            <text x={PAD.left-8} y={yPos(t)+4} fill="#8FA091" fontSize="11" textAnchor="end">{fmtNum(t)}</text>
+          </g>
+        ))}
+        {data.map((d,i) => {
+          const cx = PAD.left + groupW*i + groupW/2;
+          return (
+            <g key={i} onMouseEnter={()=>setHover(i)} onMouseLeave={()=>setHover(null)}>
+              <rect x={cx-groupW/2} y={PAD.top} width={groupW} height={plotH} fill="transparent"/>
+              {series.map((s,si) => {
+                const bx = cx - barW - gap/2 + si*(barW+gap);
+                const bh = plotH - (yPos(d[s.key]) - PAD.top);
+                return <rect key={s.key} x={bx} y={yPos(d[s.key])} width={barW} height={Math.max(0,bh)} fill={s.color} opacity={hover===i?1:0.88} rx="3"/>;
+              })}
+              <text x={cx} y={h-8} fill="#8FA091" fontSize="10.5" textAnchor="middle">{d[xKey]}</text>
+            </g>
+          );
+        })}
+        {refLine && (
+          <g>
+            <line x1={PAD.left} x2={w-PAD.right} y1={yPos(refLine.value)} y2={yPos(refLine.value)} stroke={refLine.color||'#E8A33D'} strokeWidth="1.4" strokeDasharray="5 4"/>
+            <text x={w-PAD.right} y={yPos(refLine.value)-5} fill={refLine.color||'#E8A33D'} fontSize="10" textAnchor="end">{refLine.label||''}</text>
+          </g>
+        )}
+      </svg>
+      {hover !== null && (
+        <div className="chart-tooltip" style={{left: ((PAD.left + (VB_W-PAD.left-PAD.right)/data.length*(hover+0.5))/w*100)+'%', top: (PAD.top/h*100)+'%'}}>
+          <div className="t-label">{data[hover][xKey]}</div>
+          {series.map(s => (
+            <div className="t-row" key={s.key}>
+              <span style={{color:s.color}}>{s.name}</span>
+              <span className="num">&nbsp;{fmtNum(data[hover][s.key])} {unit}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Radar / spider chart, values expected 0-100 */
+function RadarChart({data, metricKey, series, height=240, domainMin=0, domainMax=100, ringLabels}){
+  const w = VB_W, h = height;
+  const cx = w/2, cy = h/2 + 6;
+  const R = Math.min(w,h)/2 - 34;
+  const N = data.length;
+  const angle = (i) => -Math.PI/2 + i*(2*Math.PI/N);
+  const ringCount = 4;
+  const ringVals = Array.from({length:ringCount}, (_,i) => domainMin + ((i+1)/ringCount)*(domainMax-domainMin));
+
+  const toFrac = (val) => {
+    const clamped = Math.max(domainMin, Math.min(domainMax, val));
+    return (clamped - domainMin) / (domainMax - domainMin || 1);
+  };
+  const pointFor = (i, frac) => {
+    const r = frac*R;
+    const a = angle(i);
+    return [cx + r*Math.cos(a), cy + r*Math.sin(a)];
+  };
+
+  return (
+    <div className="chart-wrap">
+      <svg className="chart-svg" viewBox={`0 0 ${w} ${h}`}>
+        {ringVals.map((rv,ri) => {
+          const pts = data.map((d,i) => pointFor(i, (ri+1)/ringCount));
+          return <polygon key={ri} points={pts.map(p=>p.join(',')).join(' ')} fill="none" stroke="#2A3A2E" strokeWidth="1"/>;
+        })}
+        {data.map((d,i) => {
+          const [ex,ey] = pointFor(i, 1);
+          return <line key={i} x1={cx} y1={cy} x2={ex} y2={ey} stroke="#2A3A2E" strokeWidth="1"/>;
+        })}
+        {data.map((d,i) => {
+          const [lx,ly] = pointFor(i, 1.16);
+          return <text key={'l'+i} x={lx} y={ly+4} fill="#8FA091" fontSize="10" textAnchor="middle">{d[metricKey]}</text>;
+        })}
+        {series.map(s => {
+          const pts = data.map((d,i) => pointFor(i, toFrac(d[s.key]||0)));
+          return (
+            <g key={s.key}>
+              <polygon points={pts.map(p=>p.join(',')).join(' ')} fill={s.color} fillOpacity="0.16" stroke={s.color} strokeWidth="2"/>
+              {pts.map((p,i) => <circle key={i} cx={p[0]} cy={p[1]} r="2.4" fill={s.color}/>)}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+/* Grafico a torta — usato per la distribuzione delle tipologie di infortunio */
+const PIE_PALETTE = ['#A6E22E','#5FA8D3','#E8A33D','#E15B4E','#9B8CE8','#4FD3B8','#E8D53D','#D35FA8'];
+
+function PieChart({data, height=260}){
+  const w = VB_W, h = height;
+  const cx = w/2, cy = h/2;
+  const R = Math.min(w,h)/2 - 20;
+  const total = data.reduce((a,d)=>a+d.value, 0);
+  if(total === 0) return <div className="empty-hint">Nessun dato da mostrare.</div>;
+
+  let angleStart = -Math.PI/2;
+  const slices = data.map((d,i) => {
+    const frac = d.value/total;
+    const angleEnd = angleStart + frac*2*Math.PI;
+    const x1 = cx + R*Math.cos(angleStart), y1 = cy + R*Math.sin(angleStart);
+    const x2 = cx + R*Math.cos(angleEnd), y2 = cy + R*Math.sin(angleEnd);
+    const largeArc = (angleEnd-angleStart) > Math.PI ? 1 : 0;
+    const path = `M ${cx},${cy} L ${x1},${y1} A ${R},${R} 0 ${largeArc} 1 ${x2},${y2} Z`;
+    const midAngle = (angleStart+angleEnd)/2;
+    const labelR = R*0.68;
+    const lx = cx + labelR*Math.cos(midAngle), ly = cy + labelR*Math.sin(midAngle);
+    const slice = { path, color: PIE_PALETTE[i%PIE_PALETTE.length], pct: frac*100, lx, ly, label:d.label, value:d.value };
+    angleStart = angleEnd;
+    return slice;
+  });
+
+  return (
+    <div className="chart-wrap">
+      <svg className="chart-svg" viewBox={`0 0 ${w} ${h}`}>
+        {slices.map((s,i) => (
+          <g key={i}>
+            <path d={s.path} fill={s.color} fillOpacity="0.85" stroke="var(--pitch-050)" strokeWidth="2"/>
+            {s.pct > 5 && <text x={s.lx} y={s.ly} fill="#0B120D" fontSize="11" fontWeight="700" textAnchor="middle">{fmtNum(s.pct,0)}%</text>}
+          </g>
+        ))}
+      </svg>
+      <div className="legend-row">
+        {slices.map((s,i) => (
+          <div className="legend-item" key={i}>
+            <span className="legend-swatch" style={{background:s.color}}></span>{s.label} ({s.value})
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChartLegend({series}){
+  return (
+    <div className="legend-row">
+      {series.map(s => (
+        <div className="legend-item" key={s.key || s.name}>
+          <span className="legend-swatch" style={{background:s.color}}></span>{s.name}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* =================================================================
+   CONFIGURAZIONE — dati reali via API K-Sport (Gironda)
+   ================================================================= */
+
+const TEAM_ID = 46247;
+const MAX_SESSIONS = 20; // quante sessioni recenti caricare
+
+// Drill che rappresentano una sessione "completa" (evitiamo di sommare
+// sotto-esercizi come Aerobic/Agility Training per non duplicare la distanza)
+function isFullSession(drill){
+  const d = (drill || '').toLowerCase();
+  return d.startsWith('full training') || d.startsWith('full match') ||
+         d.startsWith('full extra time') || d === 'partita';
+}
+
+// Etichette leggibili per i parametri K-Sport riconosciuti con certezza.
+// I parametri il cui significato esatto non è documentato restano con il
+// codice originale invece di una traduzione inventata.
+const PARAM_LABELS = {
+  D: 'Distanza totale (m)',
+  T: 'Durata (s)',
+  Drel: 'Distanza al minuto (m/min)',
+  EDRel: 'Distanza equivalente al minuto (m/min)',
+  EEE: 'Spesa energetica (kJ/kg) — indicatore di carico totale',
+  AMP: 'Potenza metabolica media (W/kg)',
+  '%ED': '% distanza equivalente',
+  '%AI': '% spesa anaerobica',
+  Smax: 'Velocità massima (m/s)',
+  D_SHI: 'Distanza ad alta velocità (m)',
+  T_SHI: 'Tempo ad alta velocità (s)',
+  D_AccHI: 'Distanza ad alta accelerazione (m)',
+  D_DecHI: 'Distanza ad alta decelerazione (m)',
+  D_MPHI: 'Distanza ad alta potenza metabolica (m)',
+  T_MPHI: 'Tempo ad alta potenza metabolica (s)',
+  '%D_SHI': '% distanza ad alta velocità',
+  '%D_AccHI': '% distanza ad alta accelerazione',
+  '%D_DecHI': '% distanza ad alta decelerazione',
+  '%D_MPHI': '% distanza ad alta potenza metabolica',
+  D_S4: 'Distanza nella soglia di velocità 4 (m)',
+  D_S5: 'Distanza nella soglia di velocità 5 (m)',
+  D_S6: 'Distanza nella soglia di velocità 6 (m)',
+  D_S7: 'Distanza nella soglia di velocità 7 (m)',
+  T_MP1: 'Tempo nella soglia di potenza metabolica 1 (s)',
+  ND_MP1: 'N° ingressi nella soglia di potenza metabolica 1 (da soglia superiore)',
+};
+
+function paramsToObject(dataArray){
+  const obj = {};
+  (dataArray || []).forEach(d => { obj[d.ParameterName] = d.Value; });
+  return obj;
+}
+
+/* Chiama le funzioni serverless /api/* (mai le API K-Sport direttamente:
+   le credenziali restano protette lato server). */
+async function apiGet(path){
+  const res = await fetch(path);
+  if(!res.ok) throw new Error('Errore di rete (' + res.status + ')');
+  const json = await res.json();
+  if(json && json.error) throw new Error(json.error);
+  return json;
+}
+
+async function loadPlayers(){
+  const resp = await apiGet(`/api/players?teamID=${TEAM_ID}`);
+  const list = (resp.Data && resp.Data.Players) || [];
+  // "Team Average" non è un giocatore reale, lo escludiamo dal selettore
+  return list.filter(p => (p.PlayerName || '').toLowerCase() !== 'team average');
+}
+
+async function loadPlayerSessions(playerNameFilter){
+  const sessionsResp = await apiGet(`/api/sessions?teamID=${TEAM_ID}`);
+  const all = (sessionsResp.Records || []);
+  const fullSessions = all.filter(s => isFullSession(s.Drill));
+  fullSessions.sort((a,b) => b.Date - a.Date);
+  const recent = fullSessions.slice(0, MAX_SESSIONS);
+
+  const detailed = await Promise.all(recent.map(async (s) => {
+    try{
+      const detail = await apiGet(`/api/session-data?sessionId=${s.Session_ID}&players=${encodeURIComponent(playerNameFilter)}`);
+      const player = detail.Data && detail.Data.Players && detail.Data.Players[0];
+      if(!player) return null;
+      const p = paramsToObject(player.Data);
+      const durationSec = p.T || 0;
+      const durationMin = durationSec / 60;
+      const distance = p.D || 0;
+      return {
+        sessionId: s.Session_ID,
+        dateUnix: s.Date,
+        dateObj: new Date(s.Date * 1000),
+        label: new Date(s.Date * 1000).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit', year:'2-digit'}),
+        fullLabel: s.Session,
+        isMatch: /full match|partita|extra time/i.test(s.Drill),
+        raw: p,
+        distance,
+        eee: p.EEE || 0,
+        durationSec,
+        durationMin,
+        maxSpeedMs: p.Smax || 0,
+        maxSpeedKmh: (p.Smax || 0) * 3.6,
+        distPerMin: p.Drel || (durationMin > 0 ? distance / durationMin : 0),
+        hiDistance: p.D_SHI || 0,
+        hiTime: p.T_SHI || 0,
+        accHiDistance: p.D_AccHI || 0,
+        decHiDistance: p.D_DecHI || 0,
+        pctHi: p['%D_SHI'] || 0,
+        zones: { z4: p.D_S4 || 0, z5: p.D_S5 || 0, z6: p.D_S6 || 0, z7: p.D_S7 || 0 },
+      };
+    } catch(e){
+      return null;
+    }
+  }));
+
+  return detailed.filter(Boolean).sort((a,b) => a.dateUnix - b.dateUnix);
+}
+
+/* Carica le sessioni di TUTTA la squadra insieme (senza filtro giocatore),
+   usata per il confronto tra più atleti e per il K-Compare. */
+const MAX_TEAM_SESSIONS = 40; // copre circa 1-2 mesi di allenamenti
+
+async function loadTeamSessions(){
+  const sessionsResp = await apiGet(`/api/sessions?teamID=${TEAM_ID}`);
+  const all = (sessionsResp.Records || []);
+  const fullSessions = all.filter(s => isFullSession(s.Drill));
+  fullSessions.sort((a,b) => b.Date - a.Date);
+  const recent = fullSessions.slice(0, MAX_TEAM_SESSIONS);
+
+  const detailed = await Promise.all(recent.map(async (s) => {
+    try{
+      const detail = await apiGet(`/api/session-data?sessionId=${s.Session_ID}`);
+      const playersList = (detail.Data && detail.Data.Players) || [];
+      const players = {};
+      playersList.forEach(pl => {
+        if((pl.PlayerName||'').toLowerCase() === 'team average') return;
+        const p = paramsToObject(pl.Data);
+        const durationMin = (p.T || 0) / 60;
+        const distance = p.D || 0;
+        players[pl.PlayerName] = {
+          distance,
+          eee: p.EEE || 0,
+          maxSpeedKmh: (p.Smax || 0) * 3.6,
+          distPerMin: p.Drel || (durationMin > 0 ? distance / durationMin : 0),
+          pctHi: p['%D_SHI'] || 0,
+          hiDistance: p.D_SHI || 0,
+          accHiDistance: p.D_AccHI || 0,
+          decHiDistance: p.D_DecHI || 0,
+        };
+      });
+      return {
+        sessionId: s.Session_ID,
+        dateUnix: s.Date,
+        label: new Date(s.Date * 1000).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit', year:'2-digit'}),
+        fullLabel: s.Session,
+        drill: s.Drill,
+        isMatch: /full match|partita|extra time/i.test(s.Drill),
+        players,
+      };
+    } catch(e){
+      return null;
+    }
+  }));
+
+  return detailed.filter(Boolean).sort((a,b) => a.dateUnix - b.dateUnix);
+}
+
+/* ACWR (rapporto carico acuto:cronico), calcolato sulla Spesa Energetica (EEE,
+   kJ/kg) — nel manuale ufficiale K-Sport, EEE compare proprio nella sezione
+   "Total Load" del portale insieme a Distanza e Dist/min: è quindi il loro
+   indicatore di carico totale, più accurato della semplice distanza. Le
+   finestre sono calcolate per indice di sessione (non per giorno di
+   calendario), utile perché i dati hanno interruzioni stagionali. */
+function computeACWR(sessions){
+  return sessions.map((s, i) => {
+    const acuteWindow = sessions.slice(Math.max(0,i-6), i+1);
+    const chronicWindow = sessions.slice(Math.max(0,i-27), i+1);
+    const acute = acuteWindow.reduce((a,x)=>a+x.eee,0) / acuteWindow.length;
+    const chronic = chronicWindow.reduce((a,x)=>a+x.eee,0) / chronicWindow.length;
+    const ratio = chronic > 0 ? +(acute/chronic).toFixed(2) : 0;
+    let status = 'ok';
+    if(ratio > 1.5) status = 'danger';
+    else if(ratio > 1.3 || ratio < 0.8) status = 'warn';
+    return {...s, acute:Math.round(acute), chronic:Math.round(chronic), acwr:ratio, status};
+  });
+}
+
+const fmt = (n, d=0) => (n||0).toLocaleString('it-IT', {minimumFractionDigits:d, maximumFractionDigits:d});
+
+/* =================================================================
+   EXPORT PDF / EXCEL — report allenamento e picchi di performance
+   (interamente nel browser, tramite SheetJS e jsPDF)
+   ================================================================= */
+
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function sessionsExportRows(sessions){
+  return sessions.slice().reverse().map(s => ({
+    'Data': s.label,
+    'Sessione': s.fullLabel,
+    'Tipo': s.isMatch ? 'Partita' : 'Allenamento',
+    'Distanza (m)': +s.distance.toFixed(0),
+    'Durata (min)': +s.durationMin.toFixed(0),
+    'Vel. massima (km/h)': +s.maxSpeedKmh.toFixed(1),
+    'Distanza/min (m/min)': +s.distPerMin.toFixed(1),
+    'EEE (kJ/kg)': +s.eee.toFixed(2),
+    '% alta velocità': +s.pctHi.toFixed(1),
+  }));
+}
+
+function peaksExportRows(sessions){
+  return PEAK_METRICS.map(m => {
+    const peak = Math.max(...sessions.map(s => s[m.key] || 0));
+    const peakSession = sessions.find(s => (s[m.key]||0) === peak);
+    const last = sessions[sessions.length-1];
+    return {
+      'Parametro': m.label,
+      'Picco storico': +peak.toFixed(m.dec),
+      'Unità': m.unit,
+      'Data del picco': peakSession ? peakSession.label : '',
+      'Valore ultima sessione': +((last[m.key]||0)).toFixed(m.dec),
+      '% rispetto al picco': peak>0 ? +(((last[m.key]||0)/peak)*100).toFixed(0) : 0,
+    };
+  });
+}
+
+function exportPlayerExcel(playerName, sessions){
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sessionsExportRows(sessions)), 'Report allenamenti');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(peaksExportRows(sessions)), 'Picchi performance');
+  const out = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+  downloadBlob(new Blob([out], {type:'application/octet-stream'}), `${playerName}_report.xlsx`);
+}
+
+function exportPlayerPdf(playerName, sessions){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(16);
+  doc.text(`Report — ${playerName}`, 14, 16);
+  doc.setFontSize(10);
+  doc.text(`Generato il ${new Date().toLocaleDateString('it-IT')}`, 14, 22);
+
+  doc.setFontSize(13);
+  doc.text('Picchi di performance', 14, 32);
+  const peaks = peaksExportRows(sessions);
+  doc.autoTable({
+    startY: 36,
+    head: [Object.keys(peaks[0])],
+    body: peaks.map(r => Object.values(r)),
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [166,226,46], textColor: [11,18,13] },
+  });
+
+  const afterPeaksY = doc.lastAutoTable.finalY + 10;
+  doc.setFontSize(13);
+  doc.text('Report allenamenti', 14, afterPeaksY);
+  const sess = sessionsExportRows(sessions);
+  doc.autoTable({
+    startY: afterPeaksY + 4,
+    head: [Object.keys(sess[0])],
+    body: sess.map(r => Object.values(r)),
+    styles: { fontSize: 7 },
+    headStyles: { fillColor: [95,168,211], textColor: [11,18,13] },
+  });
+
+  doc.save(`${playerName}_report.pdf`);
+}
+
+function ExportButtons({playerName, sessions}){
+  if(!sessions || sessions.length===0) return null;
+  return (
+    <div style={{display:'flex', gap:8}}>
+      <button onClick={()=>exportPlayerPdf(playerName, sessions)} className="pill-btn" style={{cursor:'pointer'}}>⬇ PDF</button>
+      <button onClick={()=>exportPlayerExcel(playerName, sessions)} className="pill-btn" style={{cursor:'pointer'}}>⬇ Excel</button>
+    </div>
+  );
+}
+
+/* =================================================================
+   UI
+   ================================================================= */
+
+/* =================================================================
+   GIOCATORI MANUALI, TEST RIABILITAZIONE, PALESTRA — CRUD verso il DB
+   ================================================================= */
+
+async function apiCall(path, options){
+  const res = await fetch(path, options);
+  const json = await res.json().catch(() => ({}));
+  if(!res.ok || json.error) throw new Error(json.error || ('Errore di rete (' + res.status + ')'));
+  return json;
+}
+
+const loadManualPlayers = () => apiCall('/api/manual-players').then(r => r.Players || []);
+const createManualPlayer = (data) => apiCall('/api/manual-players', {
+  method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
+});
+const deleteManualPlayer = (id) => apiCall(`/api/manual-players?id=${id}`, { method:'DELETE' });
+
+const loadManualStats = (playerId) => apiCall(`/api/manual-stats?playerId=${playerId}`).then(r => r.Stats || []);
+const addManualStat = (data) => apiCall('/api/manual-stats', {
+  method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
+});
+const deleteManualStat = (id) => apiCall(`/api/manual-stats?id=${id}`, { method:'DELETE' });
+
+const loadRehabTests = (playerName) => apiCall(`/api/rehab-tests?playerName=${encodeURIComponent(playerName)}`).then(r => r.Tests || []);
+const addRehabTest = (data) => apiCall('/api/rehab-tests', {
+  method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
+});
+const deleteRehabTest = (id) => apiCall(`/api/rehab-tests?id=${id}`, { method:'DELETE' });
+const generateAiComment = (data) => apiCall('/api/ai-comment', {
+  method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
+});
+
+const loadGymSheets = (playerName) => apiCall(`/api/gym-sheets?playerName=${encodeURIComponent(playerName)}`);
+const createNewSheet = (playerName, title) => apiCall('/api/gym-sheets', {
+  method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playerName, title})
+});
+const deleteSheet = (id) => apiCall(`/api/gym-sheets?id=${id}`, { method:'DELETE' });
+const addExercise = (data) => apiCall('/api/gym-exercises', {
+  method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
+});
+const deleteExercise = (id) => apiCall(`/api/gym-exercises?id=${id}`, { method:'DELETE' });
+
+const loadDocuments = (playerName) => apiCall(`/api/documents?playerName=${encodeURIComponent(playerName)}`).then(r => r.Documents || []);
+const uploadDocument = (data) => apiCall('/api/documents', {
+  method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
+});
+const deleteDocument = (id) => apiCall(`/api/documents?id=${id}`, { method:'DELETE' });
+
+const INJURY_TYPES = ['Muscolare', 'Articolare/Legamentoso', 'Osseo', 'Tendineo', 'Altro'];
+const loadTeamInjuries = () => apiCall('/api/injuries').then(r => r.Injuries || []);
+const loadPlayerInjuries = (playerName) => apiCall(`/api/injuries?playerName=${encodeURIComponent(playerName)}`).then(r => r.Injuries || []);
+const addInjury = (data) => apiCall('/api/injuries', {
+  method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
+});
+const deleteInjury = (id) => apiCall(`/api/injuries?id=${id}`, { method:'DELETE' });
+
+/* Unisce rosa K-Sport e giocatori manuali in un'unica lista, taggata per tipo */
+async function loadUnifiedPlayers(){
+  const [gps, manual] = await Promise.all([
+    loadPlayers().catch(() => []),
+    loadManualPlayers().catch(() => []),
+  ]);
+  const gpsTagged = gps.map(p => ({ id: 'gps-'+p.PlayerId, name: p.PlayerName, type: 'gps', raw: p }));
+  const manualTagged = manual.map(p => ({ id: 'manual-'+p.id, name: p.name, type: 'manual', raw: p }));
+  return [...gpsTagged, ...manualTagged];
+}
+
+/* =================================================================
+   UI
+   ================================================================= */
+
+function Sidebar({page, setPage}){
+  const items = [
+    {id:'performance', label:'Performance'},
+    {id:'medica', label:'Area Medica'},
+    {id:'strength', label:'Area Strength'},
+    {id:'timeline', label:'Timeline'},
+  ];
+  return (
+    <div className="sidebar">
+      <div className="brand">
+        <div className="brand-mark"></div>
+        <div>
+          <div className="brand-name">PULSE</div>
+          <div className="brand-sub">GPS Performance</div>
+        </div>
+      </div>
+      {items.map(it => (
+        <button key={it.id} className={"nav-item" + (page===it.id ? " active":"")} onClick={()=>setPage(it.id)}>
+          <span className="nav-dot"></span>{it.label}
+        </button>
+      ))}
+      <div className="sidebar-foot">
+        Dati reali K-Sport + dati manuali.<br/>
+        Il carico usa la Spesa Energetica (EEE).
+      </div>
+    </div>
+  );
+}
+
+function KPICard({label, value, unit, delta, deltaLabel, deltaDir}){
+  return (
+    <div className="card kpi-card">
+      <div className="kpi-value num">{value}<span style={{fontSize:18, color:'var(--text-lo)', marginLeft:4}}>{unit}</span></div>
+      <div className="kpi-label">{label}</div>
+      {delta !== undefined &&
+        <span className={"kpi-delta " + (deltaDir==='up'?'kpi-up':deltaDir==='down'?'kpi-down':'kpi-flat')}>
+          {deltaDir==='up'?'▲':deltaDir==='down'?'▼':'—'} {delta} {deltaLabel}
+        </span>
+      }
+    </div>
+  );
+}
+
+function LoadingState(){
+  return <div className="empty-hint" style={{padding:'80px 0'}}>Caricamento in corso…</div>;
+}
+
+function ErrorState({message}){
+  return (
+    <div className="card" style={{borderColor:'var(--red)'}}>
+      <div className="card-title" style={{color:'var(--red)', marginBottom:8}}>Errore nel caricamento dei dati</div>
+      <div className="section-note">{message}</div>
+    </div>
+  );
+}
+
+const TABS = [
+  {id:'panoramica', label:'Panoramica'},
+  {id:'carico', label:'Gestione Carico'},
+  {id:'storico', label:'Storico Parametri'},
+  {id:'documenti', label:'Documenti & Riabilitazione'},
+];
+
+/* ---------------- Tab: Panoramica (confronto con i propri picchi) ---------------- */
+
+const PEAK_METRICS = [
+  {key:'distance', label:'Distanza', unit:'m', dec:0},
+  {key:'eee', label:'Spesa energetica (EEE)', unit:'kJ/kg', dec:1},
+  {key:'maxSpeedKmh', label:'Velocità massima', unit:'km/h', dec:1},
+  {key:'distPerMin', label:'Distanza/min', unit:'m/min', dec:1},
+  {key:'pctHi', label:'% alta velocità', unit:'%', dec:1},
+];
+
+function periodKeyFor(dateObj, period){
+  if(period==='month') return dateObj.getFullYear()+'-'+String(dateObj.getMonth()+1).padStart(2,'0');
+  if(period==='week'){
+    const d = new Date(dateObj);
+    const day = (d.getDay()+6)%7; // lunedì = 0
+    d.setDate(d.getDate()-day);
+    return d.toISOString().slice(0,10);
+  }
+  return dateObj.toISOString().slice(0,10);
+}
+function periodLabelFor(key, period){
+  if(period==='month'){
+    const [y,m] = key.split('-');
+    return new Date(Number(y), Number(m)-1, 1).toLocaleDateString('it-IT', {month:'short', year:'2-digit'});
+  }
+  if(period==='week') return 'Sett. ' + new Date(key).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit'});
+  return new Date(key).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit'});
+}
+
+function PanoramicaTab({sessions}){
+  const [period, setPeriod] = useState('day');
+  const [chartMetric, setChartMetric] = useState('distance');
+  if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione disponibile.</div>;
+  const last = sessions[sessions.length-1];
+
+  const cm = PEAK_METRICS.find(m=>m.key===chartMetric);
+  let chartData;
+  if(period === 'day'){
+    chartData = sessions.map(s => ({label:s.label, val:+((s[chartMetric]||0)).toFixed(cm.dec)}));
+  } else {
+    const groups = {};
+    sessions.forEach(s => {
+      const key = periodKeyFor(s.dateObj, period);
+      groups[key] = (groups[key]||0) + (s[chartMetric]||0);
+    });
+    chartData = Object.keys(groups).sort().map(key => ({label: periodLabelFor(key, period), val: +groups[key].toFixed(cm.dec)}));
+  }
+
+  return (
+    <div>
+      <div className="card" style={{marginBottom:14}}>
+        <div className="card-head"><div className="card-title">Ultima sessione — {last.fullLabel} · {last.label}</div></div>
+        <div className="grid grid-4">
+          {PEAK_METRICS.map(m => {
+            const value = last[m.key] || 0;
+            const peak = Math.max(...sessions.map(s => s[m.key] || 0));
+            const pct = peak > 0 ? (value/peak)*100 : 0;
+            return (
+              <div key={m.key} className="card kpi-card">
+                <div className="kpi-value num">{fmt(value, m.dec)}<span style={{fontSize:13, color:'var(--text-lo)', marginLeft:3}}>{m.unit}</span></div>
+                <div className="kpi-label">{m.label}</div>
+                <div className="section-note">Picco: {fmt(peak, m.dec)} {m.unit}</div>
+                <span className={"badge " + pctBadgeClass(pct)} style={{marginTop:6, display:'inline-block', fontSize:11}}>{fmt(pct,0)}% del picco</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <div className="card-title">{cm.label} nel tempo</div>
+          <div className="controls">
+            <select value={chartMetric} onChange={e=>setChartMetric(e.target.value)} style={{fontSize:12}}>
+              {PEAK_METRICS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+            </select>
+            <select value={period} onChange={e=>setPeriod(e.target.value)} style={{fontSize:12}}>
+              <option value="day">Giorno per giorno</option>
+              <option value="week">Somma settimanale</option>
+              <option value="month">Somma mensile</option>
+            </select>
+          </div>
+        </div>
+        <TrendChart data={chartData} xKey="label" area unit={cm.unit}
+          series={[{key:'val', name:cm.label, color:'#A6E22E'}]}/>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Tab: Gestione Carico ---------------- */
+
+function CaricoTab({sessions}){
+  if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione disponibile.</div>;
+  const acwrData = computeACWR(sessions).map(d => ({...d, x: d.label}));
+  const last = acwrData[acwrData.length-1];
+  const statusText = {
+    ok: 'Carico in equilibrio, nessuna azione richiesta.',
+    warn: 'Zona di attenzione: monitorare la progressione del carico nelle prossime sessioni.',
+    danger: 'Rischio elevato: valutare una riduzione del carico o giorni di recupero.'
+  };
+  const statusBadge = {ok:'badge-ok', warn:'badge-warn', danger:'badge-danger'};
+
+  return (
+    <div>
+      <div className="grid grid-4" style={{marginBottom:16}}>
+        <div className="card kpi-card">
+          <div className="kpi-value num">{last.acwr}</div>
+          <div className="kpi-label">ACWR attuale (zona ottimale 0.8–1.3)</div>
+          <span className={"badge " + statusBadge[last.status]} style={{marginTop:10, display:'inline-block'}}>
+            {last.status==='ok'?'Ottimale':last.status==='warn'?'Attenzione':'Rischio alto'}
+          </span>
+        </div>
+        <KPICard label="Carico acuto (ultime 7 sessioni)" value={fmt(last.acute,1)} unit="kJ/kg"/>
+        <KPICard label="Carico cronico (ultime 28 sessioni)" value={fmt(last.chronic,1)} unit="kJ/kg"/>
+        <KPICard label="Sessioni analizzate" value={sessions.length} unit=""/>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><div className="card-title">Andamento ACWR</div></div>
+        <TrendChart data={acwrData} xKey="x" unit="" yMin={0} yMax={2}
+          series={[{key:'acwr', name:'ACWR', color:'#A6E22E'}]}
+          refBands={[{y1:0.8, y2:1.3, color:'#A6E22E', opacity:0.08}]}
+          refLines={[{y:1.5, color:'#E15B4E', label:'Rischio alto'}, {y:0.8, color:'#2A3A2E'}, {y:1.3, color:'#2A3A2E'}]}
+        />
+        <div className="legend-row">
+          <div className="legend-item"><span className="legend-swatch" style={{background:'rgba(166,226,46,0.4)'}}></span>Zona ottimale 0.8–1.3</div>
+          <div className="legend-item"><span className="legend-swatch" style={{background:'#E15B4E'}}></span>Soglia rischio 1.5</div>
+        </div>
+        <div className="section-note">{statusText[last.status]} Calcolato sulla Spesa Energetica (EEE, kJ/kg), l'indicatore di carico usato da K-Sport nel proprio portale.</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Tab: Storico Parametri ---------------- */
+
+function StoricoTab({sessions}){
+  const [idx, setIdx] = useState(sessions.length-1);
+  if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione disponibile.</div>;
+  const s = sessions[idx];
+  const paramEntries = Object.entries(s.raw);
+
+  return (
+    <div>
+      <div className="controls" style={{marginBottom:16}}>
+        <select value={idx} onChange={e=>setIdx(Number(e.target.value))}>
+          {sessions.map((sess,i)=><option key={sess.sessionId} value={i}>{sess.label} — {sess.fullLabel}</option>)}
+        </select>
+      </div>
+      <div className="grid grid-3">
+        <div className="card">
+          <div className="card-head"><div className="card-title">Storico sessioni caricate</div></div>
+          <table>
+            <thead><tr><th>Sessione</th><th>Tipo</th><th>Distanza</th><th>Vel. max</th><th>Durata</th></tr></thead>
+            <tbody>
+              {sessions.slice().reverse().map(sess => (
+                <tr key={sess.sessionId} style={sess.sessionId===s.sessionId?{background:'var(--pitch-100)'}:{}}>
+                  <td>{sess.label} <span style={{color:'var(--text-lo)'}}>· {sess.fullLabel}</span></td>
+                  <td style={{color:'var(--text-lo)'}}>{sess.isMatch ? 'Partita' : 'Allenamento'}</td>
+                  <td className="num">{fmt(sess.distance/1000,2)} km</td>
+                  <td className="num">{fmt(sess.maxSpeedKmh,1)} km/h</td>
+                  <td className="num">{fmt(sess.durationMin,0)} min</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="card">
+          <div className="card-head"><div className="card-title">Parametri grezzi — {s.label}</div></div>
+          <table>
+            <thead><tr><th>Codice</th><th>Descrizione</th><th>Valore</th></tr></thead>
+            <tbody>
+              {paramEntries.map(([code, value]) => (
+                <tr key={code}>
+                  <td className="num">{code}</td>
+                  <td style={{color:'var(--text-lo)', fontSize:12.5}}>{PARAM_LABELS[code] || '—'}</td>
+                  <td className="num">{typeof value === 'number' ? fmt(value,2) : String(value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Tab: Documenti & Riabilitazione ---------------- */
+
+const DOC_TYPES = [
+  {value:'diagnosi', label:'Diagnosi'},
+  {value:'esame_clinico', label:'Esame clinico'},
+  {value:'esame_strumentale', label:'Esame strumentale'},
+  {value:'altro', label:'Altro'},
+];
+
+function fileToBase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function DocumentsPanel({playerName}){
+  const [docs, setDocs] = useState(null);
+  const [error, setError] = useState(null);
+  const [docType, setDocType] = useState('diagnosi');
+  const [title, setTitle] = useState('');
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  const refresh = () => loadDocuments(playerName).then(setDocs).catch(e=>setError(e.message));
+  React.useEffect(() => { refresh(); }, [playerName]);
+
+  const handleUpload = async (e) => {
+    e.preventDefault();
+    if(!file) return;
+    setUploading(true);
+    try{
+      const fileBase64 = await fileToBase64(file);
+      await uploadDocument({ playerName, docType, title: title.trim(), fileBase64, fileName: file.name });
+      setTitle(''); setFile(null);
+      refresh();
+    } catch(err){ setError(err.message); }
+    setUploading(false);
+  };
+
+  const handleDelete = async (id) => {
+    try{ await deleteDocument(id); refresh(); } catch(err){ setError(err.message); }
+  };
+
+  return (
+    <div className="card">
+      <div className="card-head"><div className="card-title">Documenti (diagnosi, esami clinici e strumentali)</div></div>
+      {error && <div className="section-note" style={{color:'var(--red)', marginBottom:8}}>{error}</div>}
+      <form onSubmit={handleUpload} style={{display:'flex', flexDirection:'column', gap:8, marginBottom:14}}>
+        <select value={docType} onChange={e=>setDocType(e.target.value)} style={{fontSize:12.5}}>
+          {DOC_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+        <input placeholder="Titolo (opzionale)" value={title} onChange={e=>setTitle(e.target.value)}
+          style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'7px 10px', borderRadius:6, fontSize:12.5}}/>
+        <input type="file" accept="application/pdf" onChange={e=>setFile(e.target.files[0]||null)} style={{fontSize:12.5}}/>
+        <button type="submit" disabled={!file || uploading} className="pill-btn on" style={{cursor:'pointer'}}>
+          {uploading ? 'Caricamento…' : 'Carica PDF'}
+        </button>
+        <div className="section-note">Limite 4 MB per file.</div>
+      </form>
+
+      {docs === null ? <div className="empty-hint">Caricamento…</div> :
+       docs.length === 0 ? <div className="empty-hint">Nessun documento caricato ancora.</div> :
+       <div style={{display:'flex', flexDirection:'column', gap:6}}>
+         {docs.map(d => (
+           <div key={d.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'7px 10px', background:'var(--pitch-100)', borderRadius:6}}>
+             <div>
+               <a href={d.blob_url} target="_blank" rel="noreferrer" style={{color:'var(--lime)', fontSize:12.5, textDecoration:'none'}}>{d.title || 'Documento'}</a>
+               <span style={{color:'var(--text-lo)', fontSize:11, marginLeft:8}}>
+                 {DOC_TYPES.find(t=>t.value===d.doc_type)?.label || d.doc_type} · {new Date(d.uploaded_at).toLocaleDateString('it-IT')}
+               </span>
+             </div>
+             <button onClick={()=>handleDelete(d.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12, cursor:'pointer'}}>✕</button>
+           </div>
+         ))}
+       </div>
+      }
+    </div>
+  );
+}
+
+function RehabTab({playerName}){
+  const [tests, setTests] = useState(null);
+  const [error, setError] = useState(null);
+  const [testName, setTestName] = useState('');
+  const [value, setValue] = useState('');
+  const [unit, setUnit] = useState('');
+  const [notes, setNotes] = useState('');
+  const [testDate, setTestDate] = useState('');
+  const [generating, setGenerating] = useState(null);
+
+  const refresh = () => loadRehabTests(playerName).then(setTests).catch(e=>setError(e.message));
+  React.useEffect(() => { refresh(); }, [playerName]);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    if(!testName.trim() || !value.trim()) return;
+    try{
+      await addRehabTest({ playerName, testName:testName.trim(), value:value.trim(), unit:unit.trim(), notes:notes.trim(), testDate: testDate || null });
+      setTestName(''); setValue(''); setUnit(''); setNotes(''); setTestDate('');
+      refresh();
+    } catch(err){ setError(err.message); }
+  };
+
+  const handleDelete = async (id) => {
+    try{ await deleteRehabTest(id); refresh(); } catch(err){ setError(err.message); }
+  };
+
+  const handleAiComment = async (t) => {
+    setGenerating(t.id);
+    try{
+      await generateAiComment({ testId:t.id, playerName, testName:t.test_name, value:t.value, unit:t.unit, notes:t.notes });
+      refresh();
+    } catch(err){ setError(err.message); }
+    setGenerating(null);
+  };
+
+  return (
+    <div>
+      {error && <div className="card" style={{borderColor:'var(--red)', marginBottom:16}}><div className="section-note" style={{color:'var(--red)'}}>{error}</div></div>}
+
+      <div className="grid grid-3" style={{marginBottom:16}}>
+        <DocumentsPanel playerName={playerName}/>
+
+        <div className="card" style={{gridColumn:'span 2'}}>
+          <div className="card-head"><div className="card-title">Aggiungi test di riabilitazione / valutazione</div></div>
+          <form onSubmit={handleAdd} style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:16}}>
+            <input placeholder="Nome test (es. Forza quadricipite)" value={testName} onChange={e=>setTestName(e.target.value)}
+              style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5, gridColumn:'1 / 4'}}/>
+            <input placeholder="Valore" value={value} onChange={e=>setValue(e.target.value)}
+              style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5}}/>
+            <input placeholder="Unità (es. kg, °)" value={unit} onChange={e=>setUnit(e.target.value)}
+              style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5}}/>
+            <input type="date" value={testDate} onChange={e=>setTestDate(e.target.value)}
+              style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5}}/>
+            <input placeholder="Note (opzionale)" value={notes} onChange={e=>setNotes(e.target.value)}
+              style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5, gridColumn:'1 / 4'}}/>
+            <button type="submit" className="pill-btn on" style={{gridColumn:'1 / 4', cursor:'pointer'}}>Aggiungi test</button>
+          </form>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><div className="card-title">Test registrati</div></div>
+        {tests === null ? <div className="empty-hint">Caricamento…</div> :
+         tests.length === 0 ? <div className="empty-hint">Nessun test registrato ancora.</div> :
+         <div style={{display:'flex', flexDirection:'column', gap:12}}>
+           {tests.map(t => (
+             <div key={t.id} className="card" style={{background:'var(--pitch-100)'}}>
+               <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
+                 <div>
+                   <div style={{fontSize:15, fontWeight:600}}>{t.test_name}</div>
+                   <div className="num" style={{fontSize:14, marginTop:2}}>{t.value} {t.unit}</div>
+                   {t.notes && <div style={{color:'var(--text-lo)', fontSize:12.5, marginTop:4}}>{t.notes}</div>}
+                   <div style={{color:'var(--text-lo)', fontSize:11.5, marginTop:4}}>{t.test_date ? new Date(t.test_date).toLocaleDateString('it-IT') : ''}</div>
+                 </div>
+                 <button onClick={()=>handleDelete(t.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12, cursor:'pointer'}}>Elimina</button>
+               </div>
+               {t.ai_comment ? (
+                 <div className="section-note" style={{marginTop:10, padding:10, background:'var(--pitch-200)', borderRadius:7}}>
+                   <b style={{color:'var(--lime)'}}>Commento AI:</b> {t.ai_comment}
+                 </div>
+               ) : (
+                 <button onClick={()=>handleAiComment(t)} disabled={generating===t.id} className="pill-btn" style={{marginTop:10, cursor:'pointer'}}>
+                   {generating===t.id ? 'Generazione…' : 'Genera commento AI'}
+                 </button>
+               )}
+             </div>
+           ))}
+         </div>
+        }
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Vista giocatore manuale ---------------- */
+
+function ManualPlayerView({player, onDeleted}){
+  const [stats, setStats] = useState(null);
+  const [error, setError] = useState(null);
+  const [statName, setStatName] = useState('');
+  const [statValue, setStatValue] = useState('');
+  const [statSession, setStatSession] = useState('');
+  const [statDate, setStatDate] = useState('');
+
+  const refresh = () => loadManualStats(player.raw.id).then(setStats).catch(e=>setError(e.message));
+  React.useEffect(() => { refresh(); }, [player.raw.id]);
+
+  const handleAddStat = async (e) => {
+    e.preventDefault();
+    if(!statName.trim() || !statValue.trim()) return;
+    try{
+      await addManualStat({ playerId:player.raw.id, statName:statName.trim(), statValue:statValue.trim(), sessionLabel:statSession.trim(), recordedDate: statDate || null });
+      setStatName(''); setStatValue(''); setStatSession(''); setStatDate('');
+      refresh();
+    } catch(err){ setError(err.message); }
+  };
+
+  const handleDeleteStat = async (id) => {
+    try{ await deleteManualStat(id); refresh(); } catch(err){ setError(err.message); }
+  };
+
+  const handleDeletePlayer = async () => {
+    try{ await deleteManualPlayer(player.raw.id); onDeleted(); } catch(err){ setError(err.message); }
+  };
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">{player.name}</h1>
+          <div className="page-sub">{player.raw.position || 'Giocatore manuale'} — nessun dato GPS</div>
+        </div>
+        <button onClick={handleDeletePlayer} className="pill-btn" style={{color:'var(--red)', cursor:'pointer'}}>Elimina giocatore</button>
+      </div>
+
+      {error && <div className="card" style={{borderColor:'var(--red)', marginBottom:16}}><div className="section-note" style={{color:'var(--red)'}}>{error}</div></div>}
+
+      <div className="grid grid-3" style={{marginBottom:16}}>
+        <div className="card">
+          <div className="card-head"><div className="card-title">Aggiungi statistica</div></div>
+          <form onSubmit={handleAddStat} style={{display:'flex', flexDirection:'column', gap:10}}>
+            <input placeholder="Nome statistica (es. Gol)" value={statName} onChange={e=>setStatName(e.target.value)}
+              style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5}}/>
+            <input placeholder="Valore" value={statValue} onChange={e=>setStatValue(e.target.value)}
+              style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5}}/>
+            <input placeholder="Sessione (opzionale)" value={statSession} onChange={e=>setStatSession(e.target.value)}
+              style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5}}/>
+            <input type="date" value={statDate} onChange={e=>setStatDate(e.target.value)}
+              style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'9px 12px', borderRadius:7, fontSize:13.5}}/>
+            <button type="submit" className="pill-btn on" style={{cursor:'pointer'}}>Aggiungi</button>
+          </form>
+        </div>
+
+        <div className="card" style={{gridColumn:'span 2'}}>
+          <div className="card-head"><div className="card-title">Statistiche registrate</div></div>
+          {stats === null ? <div className="empty-hint">Caricamento…</div> :
+           stats.length === 0 ? <div className="empty-hint">Nessuna statistica ancora.</div> :
+           <table>
+             <thead><tr><th>Statistica</th><th>Valore</th><th>Sessione</th><th>Data</th><th></th></tr></thead>
+             <tbody>
+               {stats.map(s => (
+                 <tr key={s.id}>
+                   <td>{s.stat_name}</td>
+                   <td className="num">{s.stat_value}</td>
+                   <td style={{color:'var(--text-lo)'}}>{s.session_label || '—'}</td>
+                   <td style={{color:'var(--text-lo)'}}>{s.recorded_date ? new Date(s.recorded_date).toLocaleDateString('it-IT') : '—'}</td>
+                   <td><button onClick={()=>handleDeleteStat(s.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12, cursor:'pointer'}}>✕</button></td>
+                 </tr>
+               ))}
+             </tbody>
+           </table>
+          }
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><div className="card-title">Documenti & riabilitazione</div></div>
+        <RehabTab playerName={player.name}/>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Pagina Giocatori (unificata) ---------------- */
+
+/* ---------------- Toggle riusabile Squadra / Giocatore ---------------- */
+
+function ScopeToggle({scope, setScope}){
+  return (
+    <div className="controls">
+      <button className={"pill-btn" + (scope==='squadra'?' on':'')} onClick={()=>setScope('squadra')} style={{cursor:'pointer'}}>Squadra</button>
+      <button className={"pill-btn" + (scope==='giocatore'?' on':'')} onClick={()=>setScope('giocatore')} style={{cursor:'pointer'}}>Giocatore</button>
+    </div>
+  );
+}
+
+/* ---------------- PERFORMANCE ---------------- */
+
+function PerformancePage(){
+  const [scope, setScope] = useState('squadra');
+  const [squadTab, setSquadTab] = useState('andamento');
+
+  // --- dati squadra (caricati una volta, usati da tutti i sotto-tab squadra) ---
+  const [teamSessions, setTeamSessions] = useState(null);
+  const [teamError, setTeamError] = useState(null);
+  const [selectedPlayers, setSelectedPlayers] = useState([]);
+  const [metric, setMetric] = useState('distance');
+  const [sortDir, setSortDir] = useState('desc');
+  const [sessionIdx, setSessionIdx] = useState(null);
+  const [compareBase, setCompareBase] = useState('session');
+  const [dayA, setDayA] = useState(null);
+  const [dayB, setDayB] = useState(null);
+
+  React.useEffect(() => {
+    if(scope !== 'squadra' || teamSessions !== null) return;
+    loadTeamSessions().then(data => {
+      setTeamSessions(data);
+      const allNames = Array.from(new Set(data.flatMap(s => Object.keys(s.players))));
+      setSelectedPlayers(allNames.slice(0, 8));
+      setSessionIdx(data.length - 1);
+      setDayA(Math.max(0, data.length-8));
+      setDayB(data.length-1);
+    }).catch(e=>setTeamError(e.message));
+  }, [scope]);
+
+  // --- dati giocatore singolo ---
+  const [players, setPlayers] = useState(null);
+  const [selectedName, setSelectedName] = useState('');
+  const [playerTab, setPlayerTab] = useState('panoramica');
+  const [sessions, setSessions] = useState(null);
+  const [playerError, setPlayerError] = useState(null);
+
+  React.useEffect(() => {
+    if(scope !== 'giocatore' || players !== null) return;
+    loadPlayers().then(list => {
+      setPlayers(list);
+      if(list.length) setSelectedName(list[0].PlayerName);
+    }).catch(e=>setPlayerError(e.message));
+  }, [scope]);
+
+  React.useEffect(() => {
+    if(!selectedName) return;
+    setSessions(null);
+    loadPlayerSessions(selectedName.toLowerCase()).then(setSessions).catch(e=>setPlayerError(e.message));
+  }, [selectedName]);
+
+  const m = TEAM_METRICS[metric];
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Performance</h1>
+          <div className="page-sub">Dati GPS K-Sport — vista squadra o singolo giocatore</div>
+        </div>
+        <ScopeToggle scope={scope} setScope={setScope}/>
+      </div>
+
+      {scope === 'squadra' ? (
+        teamError ? <ErrorState message={teamError}/> :
+        teamSessions === null ? <LoadingState/> :
+        teamSessions.length === 0 ? <div className="empty-hint">Nessuna sessione trovata.</div> :
+        (
+          <div>
+            <div className="chip-row" style={{marginBottom:16}}>
+              <button className={"chip" + (squadTab==='andamento'?' on':'')} onClick={()=>setSquadTab('andamento')}>Andamento</button>
+              <button className={"chip" + (squadTab==='report'?' on':'')} onClick={()=>setSquadTab('report')}>Report sessione</button>
+              <button className={"chip" + (squadTab==='ranking'?' on':'')} onClick={()=>setSquadTab('ranking')}>Classifica</button>
+              <button className={"chip" + (squadTab==='giorni'?' on':'')} onClick={()=>setSquadTab('giorni')}>Confronto giorni</button>
+            </div>
+
+            {squadTab === 'andamento' && <SquadTimelineView teamSessions={teamSessions}/>}
+            {squadTab === 'report' && <SessionReportView/>}
+
+            {squadTab === 'ranking' && (
+              <React.Fragment>
+                <div className="chip-row" style={{marginBottom:18}}>
+                  {Array.from(new Set(teamSessions.flatMap(s => Object.keys(s.players)))).sort().map(name => (
+                    <button key={name} className={"chip" + (selectedPlayers.includes(name) ? " on":"")}
+                      onClick={()=>setSelectedPlayers(sel => sel.includes(name) ? sel.filter(x=>x!==name) : [...sel, name])}>{name}</button>
+                  ))}
+                </div>
+                {selectedPlayers.length === 0 ? <div className="empty-hint">Seleziona almeno un giocatore.</div> : (
+                  <ConfrontiAtletiView teamSessions={teamSessions} selectedPlayers={selectedPlayers} metric={metric} setMetric={setMetric}
+                    sortDir={sortDir} setSortDir={setSortDir} sessionIdx={sessionIdx} setSessionIdx={setSessionIdx}
+                    compareBase={compareBase} setCompareBase={setCompareBase} m={m}/>
+                )}
+              </React.Fragment>
+            )}
+
+            {squadTab === 'giorni' && (
+              <React.Fragment>
+                <div className="chip-row" style={{marginBottom:18}}>
+                  {Array.from(new Set(teamSessions.flatMap(s => Object.keys(s.players)))).sort().map(name => (
+                    <button key={name} className={"chip" + (selectedPlayers.includes(name) ? " on":"")}
+                      onClick={()=>setSelectedPlayers(sel => sel.includes(name) ? sel.filter(x=>x!==name) : [...sel, name])}>{name}</button>
+                  ))}
+                </div>
+                {selectedPlayers.length === 0 ? <div className="empty-hint">Seleziona almeno un giocatore.</div> : (
+                  <ConfrontiGiorniView teamSessions={teamSessions} selectedPlayers={selectedPlayers} metric={metric} setMetric={setMetric}
+                    dayA={dayA} setDayA={setDayA} dayB={dayB} setDayB={setDayB} m={m}/>
+                )}
+              </React.Fragment>
+            )}
+          </div>
+        )
+      ) : (
+        playerError ? <ErrorState message={playerError}/> :
+        players === null ? <LoadingState/> :
+        (
+          <div>
+            <div className="controls" style={{marginBottom:16}}>
+              <select value={selectedName} onChange={e=>setSelectedName(e.target.value)}>
+                {players.map(p => <option key={p.PlayerId} value={p.PlayerName}>{p.PlayerName}</option>)}
+              </select>
+              {sessions && <ExportButtons playerName={selectedName} sessions={sessions}/>}
+            </div>
+            <div className="chip-row" style={{marginBottom:20}}>
+              {[{id:'panoramica',label:'Panoramica'},{id:'carico',label:'Gestione Carico'},{id:'storico',label:'Storico Parametri'},{id:'unoauno',label:'1 vs 1'}].map(t => (
+                <button key={t.id} className={"chip" + (playerTab===t.id?" on":"")} onClick={()=>setPlayerTab(t.id)}>{t.label}</button>
+              ))}
+            </div>
+            {playerTab === 'unoauno' ? <UnoAUnoView/> :
+             sessions === null ? <LoadingState/> :
+             playerTab==='panoramica' ? <PanoramicaTab sessions={sessions}/> :
+             playerTab==='carico' ? <CaricoTab sessions={sessions}/> :
+             <StoricoTab sessions={sessions}/>
+            }
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+const TEAM_METRICS = {
+  distance: {label:'Distanza', unit:'m', dec:0},
+  eee: {label:'Spesa energetica (EEE)', unit:'kJ/kg', dec:1},
+  maxSpeedKmh: {label:'Velocità massima', unit:'km/h', dec:1},
+  distPerMin: {label:'Distanza/min', unit:'m/min', dec:1},
+  pctHi: {label:'% alta velocità', unit:'%', dec:1},
+  hiDistance: {label:'Distanza alta velocità', unit:'m', dec:0},
+  accHiDistance: {label:'Distanza acc. alta intensità', unit:'m', dec:0},
+  decHiDistance: {label:'Distanza dec. alta intensità', unit:'m', dec:0},
+};
+
+function pctBadgeClass(pct){
+  if(pct >= 110) return 'badge-ok';
+  if(pct >= 90) return 'badge-warn';
+  return 'badge-danger';
+}
+
+function ConfrontiPage(){
+  const [teamSessions, setTeamSessions] = useState(null);
+  const [error, setError] = useState(null);
+  const [mode, setMode] = useState('atleti'); // 'atleti' | 'giorni'
+  const [selectedPlayers, setSelectedPlayers] = useState([]);
+  const [metric, setMetric] = useState('distance');
+  const [sortDir, setSortDir] = useState('desc');
+  const [sessionIdx, setSessionIdx] = useState(null);
+  const [compareBase, setCompareBase] = useState('session');
+  const [dayA, setDayA] = useState(null);
+  const [dayB, setDayB] = useState(null);
+
+  React.useEffect(() => {
+    loadTeamSessions()
+      .then(data => {
+        setTeamSessions(data);
+        const allNames = Array.from(new Set(data.flatMap(s => Object.keys(s.players))));
+        setSelectedPlayers(allNames.slice(0, 8));
+        setSessionIdx(data.length - 1);
+        setDayA(Math.max(0, data.length-8));
+        setDayB(data.length-1);
+      })
+      .catch(e => setError(e.message));
+  }, []);
+
+  if(error) return <ErrorState message={error}/>;
+  if(teamSessions === null) return <LoadingState/>;
+  if(teamSessions.length === 0) return <div className="empty-hint">Nessuna sessione di squadra trovata.</div>;
+
+  const allPlayerNames = Array.from(new Set(teamSessions.flatMap(s => Object.keys(s.players)))).sort();
+  const m = TEAM_METRICS[metric];
+
+  const togglePlayer = (name) => {
+    setSelectedPlayers(sel => sel.includes(name) ? sel.filter(x=>x!==name) : [...sel, name]);
+  };
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Confronti</h1>
+          <div className="page-sub">Atleti contro atleti, sessioni nel tempo, o un confronto 1 vs 1 dettagliato</div>
+        </div>
+        <div className="controls">
+          <button className={"pill-btn" + (mode==='atleti'?' on':'')} onClick={()=>setMode('atleti')} style={{cursor:'pointer'}}>Tra atleti</button>
+          <button className={"pill-btn" + (mode==='giorni'?' on':'')} onClick={()=>setMode('giorni')} style={{cursor:'pointer'}}>Tra giorni</button>
+          <button className={"pill-btn" + (mode==='unoauno'?' on':'')} onClick={()=>setMode('unoauno')} style={{cursor:'pointer'}}>1 vs 1 dettagliato</button>
+          <button className={"pill-btn" + (mode==='report'?' on':'')} onClick={()=>setMode('report')} style={{cursor:'pointer'}}>Report sessione</button>
+        </div>
+      </div>
+
+      {mode === 'unoauno' ? <UnoAUnoView/> :
+       mode === 'report' ? <SessionReportView/> : (
+        <React.Fragment>
+          <div className="chip-row" style={{marginBottom:18}}>
+            {allPlayerNames.map(name => (
+              <button key={name} className={"chip" + (selectedPlayers.includes(name) ? " on":"")} onClick={()=>togglePlayer(name)}>
+                {name}
+              </button>
+            ))}
+          </div>
+
+          {selectedPlayers.length === 0 ? <div className="empty-hint">Seleziona almeno un giocatore.</div> :
+           mode === 'atleti' ? (
+            <ConfrontiAtletiView teamSessions={teamSessions} selectedPlayers={selectedPlayers} metric={metric} setMetric={setMetric}
+              sortDir={sortDir} setSortDir={setSortDir} sessionIdx={sessionIdx} setSessionIdx={setSessionIdx}
+              compareBase={compareBase} setCompareBase={setCompareBase} m={m}/>
+           ) : (
+            <ConfrontiGiorniView teamSessions={teamSessions} selectedPlayers={selectedPlayers} metric={metric} setMetric={setMetric}
+              dayA={dayA} setDayA={setDayA} dayB={dayB} setDayB={setDayB} m={m}/>
+           )
+          }
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Confronto 1 vs 1 dettagliato (in stile K-Sport) ---------------- */
+
+const RADAR_CANDIDATES = ['%AI','%ED','%D_MPHI','%D_SHI','%D_AccHI','%D_DecHI','D','Drel','EEE','Smax','D_SHI','D_AccHI','D_DecHI','D_MPHI','D_S4','D_S5','D_S6','D_S7'];
+const DEFAULT_RADAR_METRICS = ['%AI','%ED','%D_MPHI','%D_SHI','%D_AccHI','%D_DecHI'];
+
+const HI_BAR_METRICS = [
+  {key:'%D_SHI', label:'%D_SHI'},
+  {key:'%D_AccHI', label:'%D_AccHI'},
+  {key:'%D_DecHI', label:'%D_DecHI'},
+  {key:'%D_MPHI', label:'%D_MPHI'},
+  {key:'D_S7', label:'D_S7 (m)'},
+];
+const TOTAL_LOAD_ROWS = [
+  {key:'D', label:'D (m)', dec:2},
+  {key:'Drel', label:'Drel (m/min)', dec:2},
+  {key:'EEE', label:'EEE (kJ/kg)', dec:2},
+  {key:'Smax', label:'Smax (m/s)', dec:2},
+];
+const HIGH_INTENSITY_ROWS = [
+  {key:'D_SHI', label:'D_SHI (m)', dec:2},
+  {key:'D_AccHI', label:'D_AccHI (m)', dec:2},
+  {key:'D_DecHI', label:'D_DecHI (m)', dec:2},
+  {key:'D_MPHI', label:'D_MPHI (m)', dec:2},
+  {key:'D_S6', label:'D_S6 (m)', dec:2},
+  {key:'D_S5', label:'D_S5 (m)', dec:2},
+  {key:'D_S4', label:'D_S4 (m)', dec:2},
+];
+
+function averageRawParams(sessionsSubset){
+  const keys = new Set();
+  sessionsSubset.forEach(s => Object.keys(s.raw).forEach(k=>keys.add(k)));
+  const avg = {};
+  keys.forEach(k => {
+    const vals = sessionsSubset.map(s => s.raw[k]).filter(v => typeof v === 'number');
+    avg[k] = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
+  });
+  return avg;
+}
+
+function formatDurationHMS(totalSeconds){
+  const s = Math.round(totalSeconds||0);
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  return [h,m,sec].map(x=>String(x).padStart(2,'0')).join(':');
+}
+
+/* Media e deviazione standard di ogni metrica, calcolate sullo storico
+   combinato dei due giocatori selezionati — usate come riferimento per lo z-score. */
+function computeZStats(sessions1, sessions2, metricKeys){
+  const combined = [...(sessions1||[]), ...(sessions2||[])];
+  const stats = {};
+  metricKeys.forEach(k => {
+    const vals = combined.map(s=>s.raw[k]).filter(v=>typeof v==='number');
+    const mean = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
+    const variance = vals.length ? vals.reduce((a,b)=>a+Math.pow(b-mean,2),0)/vals.length : 0;
+    stats[k] = { mean, std: Math.sqrt(variance) };
+  });
+  return stats;
+}
+function zScore(value, stat){
+  if(!stat || !stat.std) return 0;
+  return (value - stat.mean) / stat.std;
+}
+
+function PlayerPickerColumn({label, players, playerName, setPlayerName, mode, setMode, sessions}){
+  const options = [
+    {value:'avg-training', label:'Avg - Full Training'},
+    {value:'avg-match', label:'Avg - Partite'},
+    ...((sessions||[]).map(s => ({value:'session:'+s.sessionId, label: s.label+' — '+s.fullLabel}))),
+  ];
+  return (
+    <div style={{marginBottom:16}}>
+      <div className="card-title" style={{marginBottom:6}}>{label}</div>
+      <select value={playerName} onChange={e=>setPlayerName(e.target.value)} style={{width:'100%', marginBottom:6, fontSize:12.5}}>
+        <option value="">Seleziona giocatore…</option>
+        {players.map(p => <option key={p.PlayerId} value={p.PlayerName}>{p.PlayerName}</option>)}
+      </select>
+      <select value={mode} onChange={e=>setMode(e.target.value)} style={{width:'100%', fontSize:12.5}} disabled={!playerName}>
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
+/* Riga di dati allineata su 3 colonne fisse, per evitare lo sfasamento
+   che una <table> normale avrebbe con valori di lunghezza diversa. */
+function StatRow({v1, label, v2}){
+  return (
+    <div style={{display:'grid', gridTemplateColumns:'62px 1fr 62px', gap:6, alignItems:'center', padding:'4px 0', borderBottom:'1px solid var(--pitch-100)'}}>
+      <div className="num" style={{fontSize:12, textAlign:'right'}}>{v1}</div>
+      <div style={{color:'var(--text-lo)', fontSize:10.5, textAlign:'center'}}>{label}</div>
+      <div className="num" style={{fontSize:12, textAlign:'left'}}>{v2}</div>
+    </div>
+  );
+}
+
+function UnoAUnoView(){
+  const [players, setPlayers] = useState(null);
+  const [error, setError] = useState(null);
+
+  const [name1, setName1] = useState('');
+  const [mode1, setMode1] = useState('avg-training');
+  const [sessions1, setSessions1] = useState(null);
+
+  const [name2, setName2] = useState('');
+  const [mode2, setMode2] = useState('avg-training');
+  const [sessions2, setSessions2] = useState(null);
+
+  const [radarMetrics, setRadarMetrics] = useState(DEFAULT_RADAR_METRICS);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  React.useEffect(() => { loadPlayers().then(setPlayers).catch(e=>setError(e.message)); }, []);
+  React.useEffect(() => { if(name1) loadPlayerSessions(name1.toLowerCase()).then(setSessions1).catch(e=>setError(e.message)); }, [name1]);
+  React.useEffect(() => { if(name2) loadPlayerSessions(name2.toLowerCase()).then(setSessions2).catch(e=>setError(e.message)); }, [name2]);
+
+  const resolveParams = (sessions, mode) => {
+    if(!sessions) return null;
+    if(mode === 'avg-training') return averageRawParams(sessions.filter(s=>!s.isMatch));
+    if(mode === 'avg-match') return averageRawParams(sessions.filter(s=>s.isMatch));
+    if(mode.startsWith('session:')){
+      const id = Number(mode.split(':')[1]);
+      const s = sessions.find(x=>x.sessionId===id);
+      return s ? s.raw : null;
+    }
+    return null;
+  };
+
+  const handleConfronta = () => {
+    setLoading(true);
+    const p1 = resolveParams(sessions1, mode1);
+    const p2 = resolveParams(sessions2, mode2);
+    setResult({ p1, p2 });
+    setLoading(false);
+  };
+
+  const toggleRadarMetric = (key) => {
+    setRadarMetrics(sel => sel.includes(key) ? sel.filter(x=>x!==key) : [...sel, key]);
+  };
+
+  if(error) return <ErrorState message={error}/>;
+  if(players === null) return <LoadingState/>;
+
+  const zStats = result ? computeZStats(sessions1, sessions2, radarMetrics) : {};
+
+  return (
+    <div style={{display:'grid', gridTemplateColumns:'240px 1fr 300px', gap:14, alignItems:'start'}}>
+      <div className="card">
+        <PlayerPickerColumn label="Giocatore 1" players={players} playerName={name1} setPlayerName={setName1} mode={mode1} setMode={setMode1} sessions={sessions1}/>
+        <PlayerPickerColumn label="Giocatore 2" players={players} playerName={name2} setPlayerName={setName2} mode={mode2} setMode={setMode2} sessions={sessions2}/>
+
+        <div className="card-title" style={{marginBottom:6}}>Parametri nel radar (z-score)</div>
+        <div style={{display:'flex', flexWrap:'wrap', gap:5, marginBottom:14}}>
+          {RADAR_CANDIDATES.map(k => (
+            <button key={k} onClick={()=>toggleRadarMetric(k)}
+              style={{
+                fontSize:10.5, padding:'4px 8px', borderRadius:14, cursor:'pointer',
+                border:'1px solid var(--line)',
+                background: radarMetrics.includes(k) ? 'var(--pitch-200)' : 'var(--pitch-100)',
+                color: radarMetrics.includes(k) ? 'var(--lime)' : 'var(--text-lo)',
+              }}>{k}</button>
+          ))}
+        </div>
+
+        <button onClick={handleConfronta} disabled={!name1 || !name2 || loading} className="pill-btn on" style={{width:'100%', cursor:'pointer'}}>
+          {loading ? 'Confronto…' : 'Confronta'}
+        </button>
+      </div>
+
+      {!result ? <div className="empty-hint" style={{gridColumn:'span 2'}}>Scegli due giocatori e clicca "Confronta".</div> : !result.p1 || !result.p2 ? (
+        <div className="empty-hint" style={{gridColumn:'span 2'}}>Dati insufficienti per uno dei due giocatori nella modalità scelta.</div>
+      ) : (
+        <React.Fragment>
+          <div>
+            <div className="card" style={{marginBottom:14}}>
+              <div className="card-head"><div className="card-title">Performance (z-score)</div></div>
+              {radarMetrics.length < 3 ? <div className="empty-hint">Seleziona almeno 3 parametri per il radar.</div> : (() => {
+                const radarPoints = radarMetrics.map(k => ({
+                  metric: k,
+                  p1: zScore(result.p1[k]||0, zStats[k]),
+                  p2: zScore(result.p2[k]||0, zStats[k]),
+                }));
+                // Zoom automatico: la scala si adatta al massimo scostamento reale,
+                // invece di usare sempre un range fisso -3/+3 (che rimpicciolisce
+                // troppo la figura quando gli scostamenti sono piccoli).
+                const maxAbs = Math.max(1, ...radarPoints.flatMap(p => [Math.abs(p.p1), Math.abs(p.p2)]));
+                const domain = maxAbs * 1.15;
+                return (
+                  <React.Fragment>
+                    <RadarChart
+                      height={400} domainMin={-domain} domainMax={domain}
+                      data={radarPoints}
+                      metricKey="metric"
+                      series={[{key:'p1', name:name1, color:'#4FD3B8'}, {key:'p2', name:name2, color:'#E8D53D'}]}
+                    />
+                    <ChartLegend series={[{key:'p1', name:name1, color:'#4FD3B8'}, {key:'p2', name:name2, color:'#E8D53D'}]}/>
+                    <div className="section-note">Z-score calcolato sullo storico combinato dei due giocatori: 0 = media, ogni unità = una deviazione standard. Scala adattata automaticamente ai valori mostrati.</div>
+                  </React.Fragment>
+                );
+              })()}
+            </div>
+
+            <div className="card">
+              <div className="card-head"><div className="card-title">Alta intensità</div></div>
+              <BarChart2
+                height={170}
+                data={HI_BAR_METRICS.map(bm => ({label: bm.label, A: +(result.p1[bm.key]||0).toFixed(2), B: +(result.p2[bm.key]||0).toFixed(2)}))}
+                xKey="label" series={[{key:'A', name:name1, color:'#4FD3B8'}, {key:'B', name:name2, color:'#E8D53D'}]}
+              />
+              <ChartLegend series={[{key:'A', name:name1, color:'#4FD3B8'}, {key:'B', name:name2, color:'#E8D53D'}]}/>
+            </div>
+          </div>
+
+          <div className="card">
+            <div style={{display:'grid', gridTemplateColumns:'62px 1fr 62px', gap:6, textAlign:'center', marginBottom:10}}>
+              <div style={{fontWeight:700, fontSize:12.5, textAlign:'right'}}>{name1}</div>
+              <div></div>
+              <div style={{fontWeight:700, fontSize:12.5, textAlign:'left'}}>{name2}</div>
+            </div>
+            <div className="card-title" style={{marginBottom:4}}>Total Load</div>
+            {TOTAL_LOAD_ROWS.map(r => (
+              <StatRow key={r.key} v1={fmt(result.p1[r.key]||0, r.dec)} label={r.label} v2={fmt(result.p2[r.key]||0, r.dec)}/>
+            ))}
+            <StatRow v1={formatDurationHMS(result.p1.T)} label="T" v2={formatDurationHMS(result.p2.T)}/>
+
+            <div className="card-title" style={{margin:'14px 0 4px'}}>High Intensity</div>
+            {HIGH_INTENSITY_ROWS.map(r => (
+              <StatRow key={r.key} v1={fmt(result.p1[r.key]||0, r.dec)} label={r.label} v2={fmt(result.p2[r.key]||0, r.dec)}/>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Report Sessione (stile report squadra in stile K-Sport) ---------------- */
+
+const RANGE_PRESETS = [
+  {id:'2w', label:'2 settimane', days:14},
+  {id:'1m', label:'1 mese', days:30},
+  {id:'3m', label:'3 mesi', days:90},
+  {id:'all', label:'Tutto', days:null},
+];
+
+function SquadTimelineView({teamSessions}){
+  const [range, setRange] = useState('1m');
+  const [selectedPlayers, setSelectedPlayers] = useState(() =>
+    Array.from(new Set(teamSessions.flatMap(s => Object.keys(s.players)))).sort()
+  );
+
+  const preset = RANGE_PRESETS.find(r => r.id === range);
+  const cutoff = preset.days ? Date.now()/1000 - preset.days*86400 : 0;
+  const filtered = teamSessions.filter(s => s.dateUnix >= cutoff);
+
+  const allNames = Array.from(new Set(teamSessions.flatMap(s => Object.keys(s.players)))).sort();
+  const togglePlayer = (name) => setSelectedPlayers(sel => sel.includes(name) ? sel.filter(x=>x!==name) : [...sel, name]);
+  const palette = ['#A6E22E','#5FA8D3','#E8A33D','#9B8CE8','#E15B4E','#4FD3B8','#E8D53D','#D35FA8'];
+
+  return (
+    <div>
+      <div className="controls" style={{marginBottom:16}}>
+        {RANGE_PRESETS.map(r => (
+          <button key={r.id} className={"pill-btn" + (range===r.id?' on':'')} onClick={()=>setRange(r.id)} style={{cursor:'pointer'}}>{r.label}</button>
+        ))}
+        <span style={{alignSelf:'center', color:'var(--text-lo)', fontSize:12}}>{filtered.length} sessioni nell'intervallo</span>
+      </div>
+
+      <div className="chip-row" style={{marginBottom:18}}>
+        {allNames.map(name => (
+          <button key={name} className={"chip" + (selectedPlayers.includes(name) ? " on":"")} onClick={()=>togglePlayer(name)}>{name}</button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? <div className="empty-hint">Nessuna sessione in questo intervallo.</div> :
+       selectedPlayers.length === 0 ? <div className="empty-hint">Seleziona almeno un giocatore.</div> :
+       REPORT_METRICS.map(m => {
+        const data = filtered.map(s => {
+          const row = {label: s.label};
+          selectedPlayers.forEach(name => { row[name] = s.players[name] ? +(s.players[name][m.key]||0).toFixed(m.dec) : null; });
+          return row;
+        });
+        const series = selectedPlayers.map((name,i) => ({key:name, name, color: palette[i%palette.length]}));
+        return (
+          <div className="card" key={m.key} style={{marginBottom:14}}>
+            <div className="card-head"><div className="card-title">{m.label} — cronologia</div></div>
+            <TrendChart data={data} xKey="label" unit={m.unit} series={series}/>
+            <ChartLegend series={series}/>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const REPORT_METRICS = [
+  {key:'distance', label:'Distanza', unit:'m', dec:0, color:'#4FD3B8'},
+  {key:'hiDistance', label:'Distanza alta velocità', unit:'m', dec:0, color:'#5FA8D3'},
+  {key:'accHiDistance', label:'Distanza acc. alta intensità', unit:'m', dec:0, color:'#E8A33D'},
+  {key:'decHiDistance', label:'Distanza dec. alta intensità', unit:'m', dec:0, color:'#D35FA8'},
+  {key:'maxSpeedKmh', label:'Velocità massima', unit:'km/h', dec:1, color:'#E15B4E'},
+  {key:'eee', label:'Carico (EEE)', unit:'kJ/kg', dec:1, color:'#A6E22E'},
+];
+
+const SORT_MODE_LABELS = { asc:'crescente ▲', desc:'decrescente ▼', peak:'più vicino al picco ★' };
+
+function SortableMetricChart({title, unit, color, rows, sortMode, onCycle}){
+  let sorted;
+  if(sortMode === 'peak'){
+    sorted = rows.slice().sort((a,b) => b.pctPeak - a.pctPeak);
+  } else if(sortMode === 'desc'){
+    sorted = rows.slice().sort((a,b) => b.value - a.value);
+  } else {
+    sorted = rows.slice().sort((a,b) => a.value - b.value);
+  }
+  const avg = rows.length ? rows.reduce((a,r)=>a+r.value,0)/rows.length : 0;
+  const chartData = sorted.map(r => ({label:r.name, value:+r.value.toFixed(2)}));
+
+  return (
+    <div className="card" style={{marginBottom:14}}>
+      <div className="card-head" style={{cursor:'pointer'}} onClick={onCycle}>
+        <div className="card-title">{title}</div>
+        <span style={{fontSize:11, color:'var(--lime)'}}>{SORT_MODE_LABELS[sortMode]} — clic per cambiare</span>
+      </div>
+      <BarChart2 data={chartData} xKey="label" unit={unit}
+        series={[{key:'value', name:title, color}]}
+        refLine={{value:avg, label:'Media squadra', color:'#E8A33D'}}/>
+    </div>
+  );
+}
+
+function SessionReportView(){
+  const [teamSessions, setTeamSessions] = useState(null);
+  const [error, setError] = useState(null);
+  const [sessionIdx, setSessionIdx] = useState(null);
+  const [sortModes, setSortModes] = useState({});
+
+  React.useEffect(() => {
+    loadTeamSessions().then(data => {
+      setTeamSessions(data);
+      setSessionIdx(data.length - 1);
+    }).catch(e=>setError(e.message));
+  }, []);
+
+  if(error) return <ErrorState message={error}/>;
+  if(teamSessions === null) return <LoadingState/>;
+  if(teamSessions.length === 0) return <div className="empty-hint">Nessuna sessione trovata.</div>;
+
+  const session = teamSessions[sessionIdx];
+  const playerNames = Object.keys(session.players).sort();
+
+  const cycleSort = (key) => {
+    setSortModes(prev => {
+      const cur = prev[key] || 'asc';
+      const next = cur === 'asc' ? 'desc' : cur === 'desc' ? 'peak' : 'asc';
+      return {...prev, [key]: next};
+    });
+  };
+
+  const rowsFor = (metricKey) => playerNames.map(name => {
+    const value = session.players[name][metricKey] || 0;
+    const history = teamSessions.filter(s => s.players[name]).map(s => s.players[name][metricKey] || 0);
+    const peak = history.length ? Math.max(...history) : 0;
+    return { name, value, pctPeak: peak>0 ? (value/peak)*100 : 0 };
+  });
+
+  const teamAvg = (metricKey) => {
+    const vals = playerNames.map(name => session.players[name][metricKey] || 0);
+    return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
+  };
+
+  return (
+    <div>
+      <div className="controls" style={{marginBottom:16}}>
+        <select value={sessionIdx} onChange={e=>setSessionIdx(Number(e.target.value))}>
+          {teamSessions.map((s,i) => <option key={s.sessionId} value={i}>{s.label} — {s.fullLabel}</option>)}
+        </select>
+      </div>
+
+      <div className="card" style={{marginBottom:16}}>
+        <div className="card-head"><div className="card-title">Analisi dati GPS — {session.fullLabel} ({session.label})</div></div>
+        <table>
+          <thead>
+            <tr><th>Giocatore</th>{REPORT_METRICS.map(m => <th key={m.key}>{m.label}</th>)}</tr>
+          </thead>
+          <tbody>
+            <tr style={{background:'var(--pitch-200)', fontWeight:600}}>
+              <td>Media squadra</td>
+              {REPORT_METRICS.map(m => <td key={m.key} className="num">{fmt(teamAvg(m.key), m.dec)} {m.unit}</td>)}
+            </tr>
+            {playerNames.map(name => (
+              <tr key={name}>
+                <td>{name}</td>
+                {REPORT_METRICS.map(m => <td key={m.key} className="num">{fmt(session.players[name][m.key]||0, m.dec)} {m.unit}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {REPORT_METRICS.map(m => (
+        <SortableMetricChart key={m.key} title={m.label} unit={m.unit} color={m.color}
+          rows={rowsFor(m.key)} sortMode={sortModes[m.key]||'asc'} onCycle={()=>cycleSort(m.key)}/>
+      ))}
+    </div>
+  );
+}
+
+function ConfrontiAtletiView({teamSessions, selectedPlayers, metric, setMetric, sortDir, setSortDir, sessionIdx, setSessionIdx, compareBase, setCompareBase, m}){
+  const session = teamSessions[sessionIdx];
+
+  const rows = selectedPlayers
+    .filter(name => session.players[name])
+    .map(name => {
+      const value = session.players[name][metric] || 0;
+      const groupVals = selectedPlayers.filter(n => session.players[n]).map(n => session.players[n][metric] || 0);
+      const groupAvg = groupVals.length ? groupVals.reduce((a,b)=>a+b,0)/groupVals.length : 0;
+      const pctVsGroup = groupAvg > 0 ? (value/groupAvg)*100 : 0;
+      const personalHistory = teamSessions.filter(s => s.players[name]).map(s => s.players[name][metric] || 0);
+      const personalPeak = personalHistory.length ? Math.max(...personalHistory) : 0;
+      const pctVsPeak = personalPeak > 0 ? (value/personalPeak)*100 : 0;
+      const baseline = teamSessions.filter(s => s.sessionId !== session.sessionId && s.players[name] && (
+        compareBase === 'match' ? s.isMatch : s.fullLabel === session.fullLabel
+      )).map(s => s.players[name][metric] || 0);
+      const baselineAvg = baseline.length ? baseline.reduce((a,b)=>a+b,0)/baseline.length : null;
+      const pctVsBaseline = (baselineAvg && baselineAvg > 0) ? (value/baselineAvg)*100 : null;
+      return { name, value, pctVsGroup, pctVsPeak, pctVsBaseline, hasBaseline: baseline.length > 0 };
+    });
+  rows.sort((a,b) => sortDir === 'desc' ? b.value - a.value : a.value - b.value);
+
+  const trendData = teamSessions.map(s => {
+    const row = {label: s.label};
+    selectedPlayers.forEach(name => { row[name] = s.players[name] ? +(s.players[name][metric]||0).toFixed(m.dec) : null; });
+    return row;
+  });
+  const palette = ['#A6E22E','#5FA8D3','#E8A33D','#9B8CE8','#E15B4E','#4FD3B8','#E8D53D','#D35FA8'];
+  const trendSeries = selectedPlayers.map((name,i) => ({key:name, name, color: palette[i % palette.length]}));
+
+  return (
+    <React.Fragment>
+      <div className="controls" style={{marginBottom:16}}>
+        <select value={metric} onChange={e=>setMetric(e.target.value)}>
+          {Object.entries(TEAM_METRICS).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <select value={sessionIdx} onChange={e=>setSessionIdx(Number(e.target.value))}>
+          {teamSessions.map((s,i) => <option key={s.sessionId} value={i}>{s.label} — {s.fullLabel}</option>)}
+        </select>
+        <select value={compareBase} onChange={e=>setCompareBase(e.target.value)}>
+          <option value="session">K-Compare: stessa sessione (storico)</option>
+          <option value="match">K-Compare: modello partita</option>
+        </select>
+      </div>
+
+      <div className="card" style={{marginBottom:16}}>
+        <div className="card-head"><div className="card-title">Classifica — {m.label} · {session.label} ({session.fullLabel})</div></div>
+        <table>
+          <thead>
+            <tr>
+              <th>Giocatore</th>
+              <th style={{cursor:'pointer'}} onClick={()=>setSortDir(d => d==='desc'?'asc':'desc')}>{m.label} {sortDir==='desc' ? '▼' : '▲'}</th>
+              <th>% vs media gruppo</th>
+              <th>% vs proprio picco</th>
+              <th>{compareBase==='match' ? 'K-Compare vs partite' : 'K-Compare vs storico sessione'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.name}>
+                <td>{r.name}</td>
+                <td className="num">{fmt(r.value, m.dec)} {m.unit}</td>
+                <td><span className={"badge " + pctBadgeClass(r.pctVsGroup)}>{fmt(r.pctVsGroup,0)}%</span></td>
+                <td><span className={"badge " + pctBadgeClass(r.pctVsPeak)}>{fmt(r.pctVsPeak,0)}%</span></td>
+                <td>{r.hasBaseline ? <span className={"badge " + pctBadgeClass(r.pctVsBaseline)}>{fmt(r.pctVsBaseline,0)}%</span> : <span style={{color:'var(--text-lo)', fontSize:12.5}}>storico insufficiente</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="section-note">Verde ≥110%, giallo 90–110%, rosso &lt;90% (come nel portale K-Sport).</div>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><div className="card-title">{m.label} nel tempo</div></div>
+        <TrendChart data={trendData} xKey="label" unit={m.unit} series={trendSeries}/>
+        <ChartLegend series={trendSeries}/>
+      </div>
+    </React.Fragment>
+  );
+}
+
+function ConfrontiGiorniView({teamSessions, selectedPlayers, metric, setMetric, dayA, setDayA, dayB, setDayB, m}){
+  const A = teamSessions[dayA], B = teamSessions[dayB];
+
+  const barData = selectedPlayers.filter(name => A.players[name] || B.players[name]).map(name => ({
+    label: name,
+    A: A.players[name] ? +(A.players[name][metric]||0).toFixed(m.dec) : 0,
+    B: B.players[name] ? +(B.players[name][metric]||0).toFixed(m.dec) : 0,
+  }));
+
+  return (
+    <React.Fragment>
+      <div className="controls" style={{marginBottom:16}}>
+        <select value={metric} onChange={e=>setMetric(e.target.value)}>
+          {Object.entries(TEAM_METRICS).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <select value={dayA} onChange={e=>setDayA(Number(e.target.value))}>
+          {teamSessions.map((s,i) => <option key={s.sessionId} value={i}>{s.label} — {s.fullLabel}</option>)}
+        </select>
+        <span style={{alignSelf:'center', color:'var(--text-lo)'}}>vs</span>
+        <select value={dayB} onChange={e=>setDayB(Number(e.target.value))}>
+          {teamSessions.map((s,i) => <option key={s.sessionId} value={i}>{s.label} — {s.fullLabel}</option>)}
+        </select>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><div className="card-title">{m.label} — {A.label} vs {B.label}, per giocatore selezionato</div></div>
+        <BarChart2 data={barData} xKey="label" series={[
+          {key:'A', name:A.label+' ('+A.fullLabel+')', color:'#5FA8D3'},
+          {key:'B', name:B.label+' ('+B.fullLabel+')', color:'#A6E22E'}
+        ]} unit={m.unit}/>
+        <ChartLegend series={[{key:'A', name:A.label+' — '+A.fullLabel, color:'#5FA8D3'},{key:'B', name:B.label+' — '+B.fullLabel, color:'#A6E22E'}]}/>
+      </div>
+    </React.Fragment>
+  );
+}
+
+/* ---------------- Pagina Timeline ---------------- */
+
+function TimelinePage(){
+  const [mode, setMode] = useState('ksport'); // 'ksport' | 'manuali'
+  const [teamSessions, setTeamSessions] = useState(null);
+  const [manualPlayers, setManualPlayers] = useState(null);
+  const [error, setError] = useState(null);
+  const [selectedPlayers, setSelectedPlayers] = useState([]);
+  const [metric, setMetric] = useState('distance');
+  const [selectedManualPlayers, setSelectedManualPlayers] = useState([]);
+  const [manualStatName, setManualStatName] = useState('');
+  const [manualStatsData, setManualStatsData] = useState({});
+
+  React.useEffect(() => {
+    loadTeamSessions().then(data => {
+      setTeamSessions(data);
+      setSelectedPlayers(Array.from(new Set(data.flatMap(s => Object.keys(s.players))))); // tutti di default
+    }).catch(e=>setError(e.message));
+    loadManualPlayers().then(setManualPlayers).catch(()=>{});
+  }, []);
+
+  React.useEffect(() => {
+    if(mode !== 'manuali' || !manualPlayers) return;
+    Promise.all(manualPlayers.map(p => loadManualStats(p.id).then(stats => [p.name, stats])))
+      .then(entries => setManualStatsData(Object.fromEntries(entries)))
+      .catch(e=>setError(e.message));
+  }, [mode, manualPlayers]);
+
+  if(error) return <ErrorState message={error}/>;
+
+  const allStatNames = Array.from(new Set(Object.values(manualStatsData).flat().map(s=>s.stat_name)));
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Timeline</h1>
+          <div className="page-sub">Andamento dei dati nel tempo</div>
+        </div>
+        <div className="controls">
+          <button className={"pill-btn" + (mode==='ksport'?' on':'')} onClick={()=>setMode('ksport')} style={{cursor:'pointer'}}>Giocatori K-Sport</button>
+          <button className={"pill-btn" + (mode==='manuali'?' on':'')} onClick={()=>setMode('manuali')} style={{cursor:'pointer'}}>Giocatori manuali</button>
+        </div>
+      </div>
+
+      {mode === 'ksport' ? (
+        teamSessions === null ? <LoadingState/> : teamSessions.length === 0 ? <div className="empty-hint">Nessun dato disponibile.</div> : (
+          <React.Fragment>
+            <div className="controls" style={{marginBottom:16}}>
+              <select value={metric} onChange={e=>setMetric(e.target.value)}>
+                {Object.entries(TEAM_METRICS).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+            <div className="chip-row" style={{marginBottom:18}}>
+              {Array.from(new Set(teamSessions.flatMap(s => Object.keys(s.players)))).sort().map(name => (
+                <button key={name} className={"chip" + (selectedPlayers.includes(name) ? " on":"")}
+                  onClick={()=>setSelectedPlayers(sel => sel.includes(name) ? sel.filter(x=>x!==name) : [...sel, name])}>
+                  {name}
+                </button>
+              ))}
+            </div>
+            <div className="card">
+              <div className="card-head"><div className="card-title">{TEAM_METRICS[metric].label} nel tempo — tutti i giocatori</div></div>
+              <TrendChart
+                data={teamSessions.map(s => {
+                  const row = {label:s.label};
+                  selectedPlayers.forEach(name => { row[name] = s.players[name] ? +(s.players[name][metric]||0).toFixed(TEAM_METRICS[metric].dec) : null; });
+                  return row;
+                })}
+                xKey="label" unit={TEAM_METRICS[metric].unit}
+                series={selectedPlayers.map((name,i) => ({key:name, name, color: ['#A6E22E','#5FA8D3','#E8A33D','#9B8CE8','#E15B4E','#4FD3B8','#E8D53D','#D35FA8'][i%8]}))}
+              />
+            </div>
+          </React.Fragment>
+        )
+      ) : (
+        manualPlayers === null ? <LoadingState/> :
+        manualPlayers.length === 0 ? <div className="empty-hint">Nessun giocatore manuale ancora creato.</div> :
+        allStatNames.length === 0 ? <div className="empty-hint">Nessuna statistica manuale registrata ancora.</div> :
+        (
+          <React.Fragment>
+            <div className="controls" style={{marginBottom:16}}>
+              <select value={manualStatName} onChange={e=>setManualStatName(e.target.value)}>
+                <option value="">Seleziona una statistica…</option>
+                {allStatNames.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <div className="chip-row" style={{marginBottom:18}}>
+              {manualPlayers.map(p => (
+                <button key={p.id} className={"chip" + (selectedManualPlayers.includes(p.name) ? " on":"")}
+                  onClick={()=>setSelectedManualPlayers(sel => sel.includes(p.name) ? sel.filter(x=>x!==p.name) : [...sel, p.name])}>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+            {!manualStatName || selectedManualPlayers.length===0 ? <div className="empty-hint">Seleziona una statistica e almeno un giocatore.</div> : (
+              <div className="card">
+                <div className="card-head"><div className="card-title">{manualStatName} nel tempo</div></div>
+                {(() => {
+                  const dates = Array.from(new Set(
+                    selectedManualPlayers.flatMap(name => (manualStatsData[name]||[])
+                      .filter(s=>s.stat_name===manualStatName && s.recorded_date)
+                      .map(s=>s.recorded_date))
+                  )).sort();
+                  const data = dates.map(d => {
+                    const row = {label: new Date(d).toLocaleDateString('it-IT')};
+                    selectedManualPlayers.forEach(name => {
+                      const entry = (manualStatsData[name]||[]).find(s=>s.stat_name===manualStatName && s.recorded_date===d);
+                      row[name] = entry ? parseFloat(entry.stat_value) : null;
+                    });
+                    return row;
+                  });
+                  const series = selectedManualPlayers.map((name,i) => ({key:name, name, color: ['#A6E22E','#5FA8D3','#E8A33D','#9B8CE8','#E15B4E','#4FD3B8'][i%6]}));
+                  return data.length === 0 ? <div className="empty-hint">Nessuna data registrata per questa statistica.</div> : (
+                    <React.Fragment><TrendChart data={data} xKey="label" unit="" series={series}/><ChartLegend series={series}/></React.Fragment>
+                  );
+                })()}
+              </div>
+            )}
+          </React.Fragment>
+        )
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Pagina Analisi Palestra (scheda corrente + storico) ---------------- */
+
+function youtubeEmbedUrl(url){
+  if(!url) return null;
+  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([\w-]{6,15})/);
+  return m ? `https://www.youtube.com/embed/${m[1]}` : null;
+}
+
+function ExerciseForm({sheetId, onAdded}){
+  const [name, setName] = useState('');
+  const [youtube, setYoutube] = useState('');
+  const [kg, setKg] = useState('');
+  const [reps, setReps] = useState('');
+  const [recovery, setRecovery] = useState('');
+  const [notes, setNotes] = useState('');
+  const [error, setError] = useState(null);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    if(!name.trim()) return;
+    try{
+      await addExercise({ sheetId, exerciseName:name.trim(), youtubeUrl:youtube.trim(), kg: kg||null, reps: reps.trim(), recovery: recovery.trim(), notes: notes.trim() });
+      setName(''); setYoutube(''); setKg(''); setReps(''); setRecovery(''); setNotes('');
+      onAdded();
+    } catch(err){ setError(err.message); }
+  };
+
+  const inputStyle = {background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'7px 10px', borderRadius:6, fontSize:12.5};
+
+  return (
+    <form onSubmit={handleAdd} style={{display:'grid', gridTemplateColumns:'2fr 2fr 1fr 1fr 1fr', gap:6, marginBottom:14}}>
+      {error && <div className="section-note" style={{color:'var(--red)', gridColumn:'1 / -1'}}>{error}</div>}
+      <input placeholder="Esercizio" value={name} onChange={e=>setName(e.target.value)} style={inputStyle}/>
+      <input placeholder="Link YouTube (opzionale)" value={youtube} onChange={e=>setYoutube(e.target.value)} style={inputStyle}/>
+      <input placeholder="Kg" value={kg} onChange={e=>setKg(e.target.value)} style={inputStyle}/>
+      <input placeholder="Reps" value={reps} onChange={e=>setReps(e.target.value)} style={inputStyle}/>
+      <input placeholder="Recupero" value={recovery} onChange={e=>setRecovery(e.target.value)} style={inputStyle}/>
+      <input placeholder="Note (opzionale)" value={notes} onChange={e=>setNotes(e.target.value)} style={{...inputStyle, gridColumn:'1 / 4'}}/>
+      <button type="submit" className="pill-btn on" style={{gridColumn:'4 / 6', cursor:'pointer'}}>Aggiungi esercizio</button>
+    </form>
+  );
+}
+
+function ExerciseTable({exercises, onDeleted, editable}){
+  const [openVideo, setOpenVideo] = useState(null);
+  if(exercises.length === 0) return <div className="empty-hint">Nessun esercizio in questa scheda.</div>;
+  return (
+    <table>
+      <thead><tr><th>Esercizio</th><th>Video</th><th>Kg</th><th>Reps</th><th>Recupero</th><th>Note</th>{editable && <th></th>}</tr></thead>
+      <tbody>
+        {exercises.map(ex => (
+          <React.Fragment key={ex.id}>
+            <tr>
+              <td>{ex.exercise_name}</td>
+              <td>{ex.youtube_url ? (
+                <button onClick={()=>setOpenVideo(openVideo===ex.id?null:ex.id)} className="pill-btn" style={{cursor:'pointer', fontSize:11, padding:'3px 8px'}}>
+                  {openVideo===ex.id ? 'Chiudi' : '▶ Video'}
+                </button>
+              ) : '—'}</td>
+              <td className="num">{ex.kg ? fmt(Number(ex.kg),1) : '—'}</td>
+              <td className="num">{ex.reps || '—'}</td>
+              <td className="num">{ex.recovery || '—'}</td>
+              <td style={{color:'var(--text-lo)', fontSize:11.5}}>{ex.notes || '—'}</td>
+              {editable && <td><button onClick={()=>onDeleted(ex.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12, cursor:'pointer'}}>✕</button></td>}
+            </tr>
+            {openVideo===ex.id && youtubeEmbedUrl(ex.youtube_url) && (
+              <tr><td colSpan={editable?7:6}>
+                <iframe width="100%" height="280" src={youtubeEmbedUrl(ex.youtube_url)} title={ex.exercise_name}
+                  style={{border:'none', borderRadius:8}} allowFullScreen></iframe>
+              </td></tr>
+            )}
+          </React.Fragment>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/* ---------------- AREA MEDICA ---------------- */
+
+function InjuryLogPanel({playerName}){
+  const [injuries, setInjuries] = useState(null);
+  const [error, setError] = useState(null);
+  const [injuryType, setInjuryType] = useState(INJURY_TYPES[0]);
+  const [bodyPart, setBodyPart] = useState('');
+  const [injuryDate, setInjuryDate] = useState('');
+  const [daysOut, setDaysOut] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const refresh = () => loadPlayerInjuries(playerName).then(setInjuries).catch(e=>setError(e.message));
+  React.useEffect(() => { refresh(); }, [playerName]);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    try{
+      await addInjury({ playerName, injuryType, bodyPart:bodyPart.trim(), injuryDate: injuryDate||null, daysOut: daysOut||null, notes:notes.trim() });
+      setBodyPart(''); setInjuryDate(''); setDaysOut(''); setNotes('');
+      refresh();
+    } catch(err){ setError(err.message); }
+  };
+  const handleDelete = async (id) => {
+    try{ await deleteInjury(id); refresh(); } catch(err){ setError(err.message); }
+  };
+
+  return (
+    <div className="card">
+      <div className="card-head"><div className="card-title">Storico infortuni</div></div>
+      {error && <div className="section-note" style={{color:'var(--red)', marginBottom:8}}>{error}</div>}
+      <form onSubmit={handleAdd} style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:14}}>
+        <select value={injuryType} onChange={e=>setInjuryType(e.target.value)} style={{fontSize:12.5}}>
+          {INJURY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <input placeholder="Zona (es. bicipite femorale)" value={bodyPart} onChange={e=>setBodyPart(e.target.value)}
+          style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'7px 10px', borderRadius:6, fontSize:12.5}}/>
+        <input type="date" value={injuryDate} onChange={e=>setInjuryDate(e.target.value)}
+          style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'7px 10px', borderRadius:6, fontSize:12.5}}/>
+        <input placeholder="Giorni di stop" value={daysOut} onChange={e=>setDaysOut(e.target.value)}
+          style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'7px 10px', borderRadius:6, fontSize:12.5}}/>
+        <input placeholder="Note (opzionale)" value={notes} onChange={e=>setNotes(e.target.value)}
+          style={{background:'var(--pitch-100)', border:'1px solid var(--line)', color:'var(--text-hi)', padding:'7px 10px', borderRadius:6, fontSize:12.5, gridColumn:'1 / 3'}}/>
+        <button type="submit" className="pill-btn on" style={{cursor:'pointer'}}>Aggiungi</button>
+      </form>
+      {injuries === null ? <div className="empty-hint">Caricamento…</div> :
+       injuries.length === 0 ? <div className="empty-hint">Nessun infortunio registrato.</div> :
+       <table>
+         <thead><tr><th>Tipo</th><th>Zona</th><th>Data</th><th>Giorni stop</th><th>Note</th><th></th></tr></thead>
+         <tbody>
+           {injuries.map(inj => (
+             <tr key={inj.id}>
+               <td>{inj.injury_type}</td>
+               <td style={{color:'var(--text-lo)'}}>{inj.body_part || '—'}</td>
+               <td style={{color:'var(--text-lo)'}}>{inj.injury_date ? new Date(inj.injury_date).toLocaleDateString('it-IT') : '—'}</td>
+               <td className="num">{inj.days_out || '—'}</td>
+               <td style={{color:'var(--text-lo)', fontSize:11.5}}>{inj.notes || '—'}</td>
+               <td><button onClick={()=>handleDelete(inj.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12, cursor:'pointer'}}>✕</button></td>
+             </tr>
+           ))}
+         </tbody>
+       </table>
+      }
+    </div>
+  );
+}
+
+function AreaMedicaPage(){
+  const [scope, setScope] = useState('squadra');
+  const [teamInjuries, setTeamInjuries] = useState(null);
+  const [error, setError] = useState(null);
+  const [players, setPlayers] = useState(null);
+  const [selectedName, setSelectedName] = useState('');
+
+  React.useEffect(() => {
+    if(scope !== 'squadra' || teamInjuries !== null) return;
+    loadTeamInjuries().then(setTeamInjuries).catch(e=>setError(e.message));
+  }, [scope]);
+
+  React.useEffect(() => {
+    if(scope !== 'giocatore' || players !== null) return;
+    loadUnifiedPlayers().then(list => {
+      setPlayers(list);
+      if(list.length) setSelectedName(list[0].name);
+    }).catch(e=>setError(e.message));
+  }, [scope]);
+
+  if(error) return <ErrorState message={error}/>;
+
+  const pieByType = teamInjuries ? INJURY_TYPES.map(t => ({label:t, value: teamInjuries.filter(i=>i.injury_type===t).length})).filter(d=>d.value>0) : [];
+  const pieByPlayer = teamInjuries ? Object.entries(
+    teamInjuries.reduce((acc,i)=>{ acc[i.player_name]=(acc[i.player_name]||0)+1; return acc; }, {})
+  ).map(([label,value])=>({label,value})) : [];
+  const totalDaysOut = teamInjuries ? teamInjuries.reduce((a,i)=>a+(Number(i.days_out)||0),0) : 0;
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Area Medica</h1>
+          <div className="page-sub">Infortuni, test e documenti clinici</div>
+        </div>
+        <ScopeToggle scope={scope} setScope={setScope}/>
+      </div>
+
+      {scope === 'squadra' ? (
+        teamInjuries === null ? <LoadingState/> : (
+          <div>
+            <div className="grid grid-4" style={{marginBottom:16}}>
+              <KPICard label="Infortuni totali" value={teamInjuries.length} unit=""/>
+              <KPICard label="Giorni di stop totali" value={totalDaysOut} unit="gg"/>
+              <KPICard label="Giocatori coinvolti" value={pieByPlayer.length} unit=""/>
+              <KPICard label="Tipo più frequente" value={pieByType.length ? pieByType.slice().sort((a,b)=>b.value-a.value)[0].label : '—'} unit=""/>
+            </div>
+            <div className="grid grid-2" style={{marginBottom:16}}>
+              <div className="card">
+                <div className="card-head"><div className="card-title">Distribuzione per tipologia</div></div>
+                <PieChart data={pieByType}/>
+              </div>
+              <div className="card">
+                <div className="card-head"><div className="card-title">Distribuzione per giocatore</div></div>
+                <PieChart data={pieByPlayer}/>
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-head"><div className="card-title">Storico completo</div></div>
+              {teamInjuries.length === 0 ? <div className="empty-hint">Nessun infortunio registrato.</div> :
+               <table>
+                 <thead><tr><th>Giocatore</th><th>Tipo</th><th>Zona</th><th>Data</th><th>Giorni stop</th></tr></thead>
+                 <tbody>
+                   {teamInjuries.map(inj => (
+                     <tr key={inj.id}>
+                       <td>{inj.player_name}</td>
+                       <td>{inj.injury_type}</td>
+                       <td style={{color:'var(--text-lo)'}}>{inj.body_part || '—'}</td>
+                       <td style={{color:'var(--text-lo)'}}>{inj.injury_date ? new Date(inj.injury_date).toLocaleDateString('it-IT') : '—'}</td>
+                       <td className="num">{inj.days_out || '—'}</td>
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
+              }
+            </div>
+          </div>
+        )
+      ) : (
+        players === null ? <LoadingState/> : (
+          <div>
+            <div className="controls" style={{marginBottom:16}}>
+              <select value={selectedName} onChange={e=>setSelectedName(e.target.value)}>
+                {players.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+              </select>
+            </div>
+            <div style={{marginBottom:16}}><InjuryLogPanel playerName={selectedName}/></div>
+            <RehabTab playerName={selectedName}/>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+/* ---------------- AREA STRENGTH ---------------- */
+
+function PlayerGymSheetPanel({playerName}){
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [openHistoryId, setOpenHistoryId] = useState(null);
+
+  const refresh = () => loadGymSheets(playerName).then(setData).catch(e=>setError(e.message));
+  React.useEffect(() => { setData(null); refresh(); }, [playerName]);
+
+  const handleNewSheet = async () => {
+    try{ await createNewSheet(playerName); refresh(); } catch(err){ setError(err.message); }
+  };
+  const handleDeleteExercise = async (id) => {
+    try{ await deleteExercise(id); refresh(); } catch(err){ setError(err.message); }
+  };
+  const handleDeleteSheet = async (id) => {
+    try{ await deleteSheet(id); refresh(); } catch(err){ setError(err.message); }
+  };
+
+  if(error) return <ErrorState message={error}/>;
+  if(data === null) return <LoadingState/>;
+
+  return (
+    <div>
+      <div className="card" style={{marginBottom:16}}>
+        <div className="card-head">
+          <div className="card-title">Scheda corrente — {data.current.title}</div>
+          <button onClick={handleNewSheet} className="pill-btn" style={{cursor:'pointer'}}>+ Nuova scheda</button>
+        </div>
+        <ExerciseForm sheetId={data.current.id} onAdded={refresh}/>
+        <ExerciseTable exercises={data.current.exercises} onDeleted={handleDeleteExercise} editable/>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><div className="card-title">Storico schede ({data.history.length})</div></div>
+        {data.history.length === 0 ? <div className="empty-hint">Nessuna scheda precedente.</div> : (
+          <div style={{display:'flex', flexDirection:'column', gap:8}}>
+            {data.history.map(sheet => (
+              <div key={sheet.id} className="card" style={{background:'var(--pitch-100)'}}>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer'}}
+                  onClick={()=>setOpenHistoryId(openHistoryId===sheet.id?null:sheet.id)}>
+                  <div>
+                    <b style={{fontSize:13}}>{sheet.title}</b>
+                    <span style={{color:'var(--text-lo)', fontSize:11.5, marginLeft:8}}>
+                      {new Date(sheet.created_at).toLocaleDateString('it-IT')} · {sheet.exercises.length} esercizi
+                    </span>
+                  </div>
+                  <div style={{display:'flex', gap:10, alignItems:'center'}}>
+                    <span style={{fontSize:11, color:'var(--text-lo)'}}>{openHistoryId===sheet.id ? '▲' : '▼'}</span>
+                    <button onClick={(e)=>{e.stopPropagation(); handleDeleteSheet(sheet.id);}} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:11.5, cursor:'pointer'}}>Elimina</button>
+                  </div>
+                </div>
+                {openHistoryId===sheet.id && (
+                  <div style={{marginTop:10}}><ExerciseTable exercises={sheet.exercises} editable={false}/></div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AreaStrengthPage(){
+  const [scope, setScope] = useState('squadra');
+  const [players, setPlayers] = useState(null);
+  const [error, setError] = useState(null);
+  const [selectedName, setSelectedName] = useState('');
+  const [teamSummary, setTeamSummary] = useState(null);
+
+  React.useEffect(() => {
+    loadUnifiedPlayers().then(list => {
+      setPlayers(list);
+      if(list.length) setSelectedName(list[0].name);
+    }).catch(e=>setError(e.message));
+  }, []);
+
+  React.useEffect(() => {
+    if(scope !== 'squadra' || players === null || teamSummary !== null) return;
+    Promise.all(players.map(p => loadGymSheets(p.name).then(d => ({name:p.name, title:d.current.title, count:d.current.exercises.length}))))
+      .then(setTeamSummary)
+      .catch(e=>setError(e.message));
+  }, [scope, players]);
+
+  if(error) return <ErrorState message={error}/>;
+  if(players === null) return <LoadingState/>;
+
+  return (
+    <div>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Area Strength</h1>
+          <div className="page-sub">Schede palestra e test per giocatore</div>
+        </div>
+        <ScopeToggle scope={scope} setScope={setScope}/>
+      </div>
+
+      {scope === 'squadra' ? (
+        teamSummary === null ? <LoadingState/> : (
+          <div className="card">
+            <div className="card-head"><div className="card-title">Schede correnti — tutta la squadra</div></div>
+            <table>
+              <thead><tr><th>Giocatore</th><th>Scheda corrente</th><th>N° esercizi</th></tr></thead>
+              <tbody>
+                {teamSummary.map(t => (
+                  <tr key={t.name}>
+                    <td>{t.name}</td>
+                    <td style={{color:'var(--text-lo)'}}>{t.title}</td>
+                    <td className="num">{t.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      ) : (
+        <div>
+          <div className="controls" style={{marginBottom:16}}>
+            <select value={selectedName} onChange={e=>setSelectedName(e.target.value)}>
+              {players.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+            </select>
+          </div>
+          <div style={{marginBottom:16}}><PlayerGymSheetPanel playerName={selectedName}/></div>
+          <RehabTab playerName={selectedName}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error){ return { error }; }
+  componentDidCatch(error, info){ console.error('Errore nella pagina:', error, info); }
+  render(){
+    if(this.state.error){
+      return (
+        <div className="card" style={{borderColor:'var(--red)'}}>
+          <div className="card-title" style={{color:'var(--red)', marginBottom:8}}>Si è verificato un errore in questa pagina</div>
+          <div className="section-note" style={{color:'var(--text-hi)'}}>{String(this.state.error.message || this.state.error)}</div>
+          <div className="section-note">Prova a cambiare pagina e tornare indietro, oppure ricarica il sito.</div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function App(){
+  const [page, setPage] = useState('performance');
+  const pages = {
+    performance: <PerformancePage/>,
+    medica: <AreaMedicaPage/>,
+    strength: <AreaStrengthPage/>,
+    timeline: <TimelinePage/>,
+  };
+  return (
+    <div className="app">
+      <Sidebar page={page} setPage={setPage}/>
+      <div className="main"><ErrorBoundary key={page}>{pages[page]}</ErrorBoundary></div>
+    </div>
+  );
+}
+
+document.getElementById('root').dataset.mounted = "1";
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
