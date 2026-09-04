@@ -52,6 +52,14 @@ async function ensureTables(client){
       created_at TIMESTAMP DEFAULT NOW()
     );
   `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS staff_tokens (
+      id SERIAL PRIMARY KEY,
+      role TEXT NOT NULL UNIQUE,
+      token TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
 }
 
 async function fetchSheetWithExercises(client, sheet){
@@ -80,6 +88,23 @@ export default async function handler(req, res) {
         if (existing.length > 0) return res.status(200).json({ Result: 'OK', token: existing[0].token });
         const newToken = crypto.randomBytes(16).toString('hex');
         await client.query('INSERT INTO player_tokens (player_name, token) VALUES ($1, $2)', [playerName, newToken]);
+        return res.status(200).json({ Result: 'OK', token: newToken });
+      }
+
+      if (action === 'staff_resolve') {
+        if (!token) return res.status(400).json({ error: 'Parametro token mancante.' });
+        const { rows } = await client.query('SELECT role FROM staff_tokens WHERE token = $1', [token]);
+        if (rows.length === 0) return res.status(404).json({ error: 'Link non valido.' });
+        return res.status(200).json({ Result: 'OK', role: rows[0].role });
+      }
+
+      if (action === 'staff_token') {
+        const { role } = req.query;
+        if (!role) return res.status(400).json({ error: 'Parametro role mancante.' });
+        const { rows: existing } = await client.query('SELECT token FROM staff_tokens WHERE role = $1', [role]);
+        if (existing.length > 0) return res.status(200).json({ Result: 'OK', token: existing[0].token });
+        const newToken = crypto.randomBytes(16).toString('hex');
+        await client.query('INSERT INTO staff_tokens (role, token) VALUES ($1, $2)', [role, newToken]);
         return res.status(200).json({ Result: 'OK', token: newToken });
       }
 
