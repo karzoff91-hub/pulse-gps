@@ -706,6 +706,7 @@ function isFullSession(drill){
 // I parametri il cui significato esatto non è documentato restano con il
 // codice originale invece di una traduzione inventata.
 const PARAM_EXPLANATIONS = {
+  acwr: 'Rapporto Carico Acuto:Cronico — confronta la fatica accumulata nell\'ultima settimana (carico acuto) con la media delle ultime 4 settimane (carico cronico). Sopra 1,3 il carico recente è più alto del solito: possibile rischio di infortunio da sovraccarico. Sotto 0,8 il carico è più basso del solito, che può indicare scarsa forma o rischio se poi si riprende troppo in fretta. La zona 0,8-1,3 è generalmente considerata la più sicura.',
   distance: 'Distanza totale percorsa durante la sessione.',
   eee: 'Spesa energetica (EEE): indicatore di carico totale, misura il dispendio energetico stimato — è quello che K-Sport usa come "Total Load".',
   maxSpeedKmh: 'Velocità massima istantanea raggiunta durante la sessione.',
@@ -2017,7 +2018,7 @@ function CaricoTab({sessions}){
       <div className="grid grid-4" style={{marginBottom:16}}>
         <div className="card kpi-card">
           <div className="kpi-value num">{last.acwr}</div>
-          <div className="kpi-label">ACWR attuale (zona ottimale 0.8–1.3)</div>
+          <div className="kpi-label"><InfoLabel paramKey="acwr" label="ACWR attuale (zona ottimale 0.8–1.3)" style={{color:'var(--text-lo)', fontSize:11}}/></div>
           <span className={"badge " + statusBadge[last.status]} style={{marginTop:10, display:'inline-block'}}>
             {last.status==='ok'?'Ottimale':last.status==='warn'?'Attenzione':'Rischio alto'}
           </span>
@@ -2028,7 +2029,7 @@ function CaricoTab({sessions}){
       </div>
 
       <div className="card">
-        <div className="card-head"><div className="card-title">Andamento ACWR</div></div>
+        <div className="card-head"><div className="card-title"><InfoLabel paramKey="acwr" label="Andamento ACWR"/></div></div>
         <TrendChart data={acwrData} xKey="x" unit="" yMin={0} yMax={2}
           series={[{key:'acwr', name:'ACWR', color:'#A6E22E'}]}
           refBands={[{y1:0.8, y2:1.3, color:'#A6E22E', opacity:0.08}]}
@@ -2823,6 +2824,22 @@ const TEST_CATALOG = {
   ],
 };
 const ALL_TEST_DEFS = [...TEST_CATALOG.metabolico, ...TEST_CATALOG.forza];
+
+/* Spiegazione in linguaggio semplice di ogni test — pensata per essere
+   capita anche da chi non ha un background tecnico (es. un atleta che la
+   legge da solo, senza uno spiegone a voce dello staff). Vive dentro
+   PARAM_EXPLANATIONS così InfoLabel le trova automaticamente. */
+Object.assign(PARAM_EXPLANATIONS, {
+  yoyo_ir1: 'Test Yo-Yo di Recupero Intermittente (livello 1): corsa a navetta con brevi pause di recupero. La distanza percorsa prima di non farcela più stima la capacità aerobica.',
+  test_30_15: 'Test intermittente 30"-15" (30 secondi di corsa, 15 di recupero, velocità che aumenta ad ogni blocco). La VIFT è la velocità dell\'ultimo blocco completato — serve a calibrare gli allenamenti intervallati.',
+  conconi: 'Corsa a velocità progressivamente crescente. La "velocità di soglia" è il punto in cui il battito cardiaco smette di salire in proporzione alla velocità — indica il limite aerobico.',
+  metabolimetro: 'Test in laboratorio (cardiopolmonare): misura direttamente quanto ossigeno consuma il corpo durante uno sforzo crescente — il modo più preciso per conoscere il VO2max.',
+  gacon: 'Simile al 30"-15", ma con blocchi da 45 secondi di corsa e 15 di recupero. La VMI è la velocità massima intermittente raggiunta.',
+  cmj: 'Salto verticale con contromovimento (ci si piega e si spinge subito verso l\'alto). Misura la forza esplosiva delle gambe.',
+  drop_jump: 'Ci si lascia cadere da un rialzo e si salta subito verso l\'alto appena si tocca terra. L\'RSI (Reactive Strength Index) misura quanto velocemente ed efficacemente le gambe trasformano l\'atterraggio in spinta.',
+  imtp: 'Trazione isometrica (senza muoversi) da una posizione di mezzo squat contro una barra fissa. Misura la forza massima che il giocatore riesce a esprimere.',
+  single_leg_jump: 'Salto su una gamba sola, ripetuto su entrambe. L\'asimmetria confronta le due gambe: un valore alto può indicare uno squilibrio o un rischio di infortunio.',
+});
 function findTestDef(key){ return ALL_TEST_DEFS.find(t => t.key === key) || null; }
 const TEST_SOURCES = [
   {value:'preparatore', label:'Preparatore'},
@@ -3028,7 +3045,7 @@ function TeamTestSection(){
                 <div key={ev.id} className="card" style={{background:'var(--pitch-100)', padding:'10px 12px'}}>
                   <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer'}} onClick={()=>setOpenEventId(openEventId===ev.id?null:ev.id)}>
                     <div>
-                      <b style={{fontSize:12.5}}>{ev.testName}</b>
+                      <b style={{fontSize:12.5}}><InfoLabel paramKey={ev.testKey} label={ev.testName}/></b>
                       <span style={{color:'var(--text-lo)', fontSize:11, marginLeft:8}}>{ev.testDate ? new Date(ev.testDate).toLocaleDateString('it-IT') : '—'} · {ev.tests.length} giocatori</span>
                     </div>
                     <span style={{fontSize:10.5, color:'var(--text-lo)'}}>{openEventId===ev.id ? '▲' : '▼'}</span>
@@ -3062,7 +3079,7 @@ function TeamTestSection(){
 
 /* ---------------- Test Individuali ---------------- */
 
-function IndividualTestSection({initialPlayer, lockedPlayer}){
+function IndividualTestSection({initialPlayer, lockedPlayer, readOnly}){
   const [players, setPlayers] = useState(null);
   const [selectedName, setSelectedName] = useState(initialPlayer || '');
   const [error, setError] = useState(null);
@@ -3113,7 +3130,8 @@ function IndividualTestSection({initialPlayer, lockedPlayer}){
   if(!lockedPlayer && players === null) return <LoadingState/>;
 
   return (
-    <div style={{display:'grid', gridTemplateColumns:'320px 1fr', gap:16, alignItems:'start'}}>
+    <div style={readOnly ? undefined : {display:'grid', gridTemplateColumns:'320px 1fr', gap:16, alignItems:'start'}}>
+      {!readOnly && (
       <div className="card">
         <div className="card-head"><div className="card-title">Nuovo test individuale</div></div>
         <div className="controls" style={{marginBottom:12}}>
@@ -3140,20 +3158,21 @@ function IndividualTestSection({initialPlayer, lockedPlayer}){
         </button>
         <div className="section-note" style={{marginTop:10}}>Utile per test fatti dal fisio personale o dal preparatore fuori dal calendario di squadra.</div>
       </div>
+      )}
 
       <div className="card">
         <div className="card-head"><div className="card-title">Storico test — {selectedName}</div></div>
         {tests === null ? <LoadingState/> : tests.length === 0 ? <div className="empty-hint">Nessun test individuale registrato per questo giocatore.</div> : (
           <table>
-            <thead><tr><th>Test</th><th>Data</th><th>Risultato</th><th>Fonte</th><th></th></tr></thead>
+            <thead><tr><th>Test</th><th>Data</th><th>Risultato</th><th>Fonte</th>{!readOnly && <th></th>}</tr></thead>
             <tbody>
               {tests.map(t => (
                 <tr key={t.id}>
-                  <td>{t.test_name}</td>
+                  <td><InfoLabel paramKey={t.test_key} label={t.test_name}/></td>
                   <td style={{color:'var(--text-lo)'}}>{t.test_date ? new Date(t.test_date).toLocaleDateString('it-IT') : '—'}</td>
                   <td><TestResultLine test={t}/></td>
                   <td style={{color:'var(--text-lo)', fontSize:11.5}}>{(TEST_SOURCES.find(s=>s.value===t.source)||{}).label || '—'}</td>
-                  <td><button onClick={()=>handleDelete(t.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12, cursor:'pointer'}}>✕</button></td>
+                  {!readOnly && <td><button onClick={()=>handleDelete(t.id)} style={{background:'transparent', border:'none', color:'var(--red)', fontSize:12, cursor:'pointer'}}>✕</button></td>}
                 </tr>
               ))}
             </tbody>
@@ -6028,6 +6047,7 @@ function AthleteView({token}){
         <button className={"nav-item" + (tab==='performance'?' active':'')} onClick={()=>setTab('performance')}><span className="nav-dot"></span>Performance</button>
         <button className={"nav-item" + (tab==='medica'?' active':'')} onClick={()=>setTab('medica')}><span className="nav-dot"></span>Area Medica</button>
         <button className={"nav-item" + (tab==='strength'?' active':'')} onClick={()=>setTab('strength')}><span className="nav-dot"></span>Area Strength</button>
+        <button className={"nav-item" + (tab==='test'?' active':'')} onClick={()=>setTab('test')}><span className="nav-dot"></span>Test</button>
         <div className="sidebar-foot">Vista personale di {playerName}.<br/>Puoi modificare i Kg della tua scheda e i tuoi dati fisici (altezza/peso/età).</div>
       </div>
       <div className="main">
@@ -6057,6 +6077,12 @@ function AthleteView({token}){
             <div>
               <div className="topbar"><div><h1 className="page-title">Area Strength — {playerName}</h1></div></div>
               <AthleteGymSheet playerName={playerName} token={token}/>
+            </div>
+          )}
+          {tab==='test' && (
+            <div>
+              <div className="topbar"><div><h1 className="page-title">Test — {playerName}</h1></div></div>
+              <IndividualTestSection initialPlayer={playerName} lockedPlayer readOnly/>
             </div>
           )}
         </ErrorBoundary>
