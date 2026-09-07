@@ -1015,18 +1015,26 @@ async function loadTeamSessions(){
    indicatore di carico totale, più accurato della semplice distanza. Le
    finestre sono calcolate per indice di sessione (non per giorno di
    calendario), utile perché i dati hanno interruzioni stagionali. */
-function computeACWR(sessions){
-  return sessions.map((s, i) => {
-    const acuteWindow = sessions.slice(Math.max(0,i-6), i+1);
-    const chronicWindow = sessions.slice(Math.max(0,i-27), i+1);
-    const acute = acuteWindow.reduce((a,x)=>a+x.eee,0) / acuteWindow.length;
-    const chronic = chronicWindow.reduce((a,x)=>a+x.eee,0) / chronicWindow.length;
+/* Calcolo ACWR generico: dato un array già ordinato cronologicamente con un
+   campo numerico "loadKey", calcola acuto/cronico/rapporto/stato per ogni
+   punto. Usato sia per l'EEE del GPS sia per l'SRPE del Carico Interno —
+   stessa identica logica (media mobile semplice, finestra 7/28), cambia
+   solo il dato sorgente. */
+function computeACWRGeneric(items, loadKey){
+  return items.map((s, i) => {
+    const acuteWindow = items.slice(Math.max(0,i-6), i+1);
+    const chronicWindow = items.slice(Math.max(0,i-27), i+1);
+    const acute = acuteWindow.reduce((a,x)=>a+x[loadKey],0) / acuteWindow.length;
+    const chronic = chronicWindow.reduce((a,x)=>a+x[loadKey],0) / chronicWindow.length;
     const ratio = chronic > 0 ? +(acute/chronic).toFixed(2) : 0;
     let status = 'ok';
     if(ratio > 1.5) status = 'danger';
     else if(ratio > 1.3 || ratio < 0.8) status = 'warn';
     return {...s, acute:Math.round(acute), chronic:Math.round(chronic), acwr:ratio, status};
   });
+}
+function computeACWR(sessions){
+  return computeACWRGeneric(sessions, 'eee');
 }
 
 /* Rapporto Acc/Dec ad alta intensità, sul CONTEGGIO di eventi (confermato
@@ -2107,10 +2115,35 @@ function WeekCompareTab({sessions}){
 
 /* ---------------- Tab: Gestione Carico ---------------- */
 
-function CaricoTab({sessions}){
+const ACWR_METRICS = [
+  { key:'eee', label:'Spesa Energetica (EEE)', unit:'kJ/kg', source:'gps', color:'#A6E22E' },
+  { key:'distPerMin', label:'Distanza relativa (Drel)', unit:'m/min', source:'gps', color:'#5FA8D3' },
+  { key:'hiDistance', label:'Distanza alta velocità (D>15,9)', unit:'m', source:'gps', color:'#E8A33D' },
+  { key:'accdec', label:'Rapporto Acc/Dec', unit:'', source:'accdec', color:'#9B8CE8' },
+  { key:'srpe', label:'SRPE (Carico Interno)', unit:'u.a.', source:'srpe', color:'#E8D53D' },
+];
+
+function CaricoTab({sessions, playerName}){
+  const [srpeEntries, setSrpeEntries] = useState(null);
+  const [metricKey, setMetricKey] = useState('eee');
+  React.useEffect(() => {
+    if(!playerName){ setSrpeEntries([]); return; }
+    setSrpeEntries(null);
+    loadTestsForCategory(playerName, 'benessere').then(all => {
+      const items = all
+        .filter(t => t.test_key === 'rpe' && t.details && t.details.srpe)
+        .map(t => ({ date: t.test_date, label: t.test_date ? new Date(t.test_date).toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit'}) : '—', value: Number(t.details.srpe) }))
+        .sort((a,b) => new Date(a.date||0) - new Date(b.date||0));
+      setSrpeEntries(items);
+    }).catch(() => setSrpeEntries([]));
+  }, [playerName]);
+
   if(sessions.length === 0) return <div className="empty-hint">Nessuna sessione disponibile.</div>;
-  const acwrData = computeACWR(sessions).map(d => ({...d, x: d.label}));
-  const last = acwrData[acwrData.length-1];
+
+  const accDecData = computeAccDecRatio(sessions);
+  const validAccDec = accDecData.filter(d => d.ratio !== null);
+  const lastAccDec = validAccDec.length ? validAccDec[validAccDec.length-1] : null;
+
   const statusText = {
     ok: 'Carico in equilibrio, nessuna azione richiesta.',
     warn: 'Zona di attenzione: monitorare la progressione del carico nelle prossime sessioni.',
@@ -2118,41 +2151,77 @@ function CaricoTab({sessions}){
   };
   const statusBadge = {ok:'badge-ok', warn:'badge-warn', danger:'badge-danger'};
 
-  const accDecData = computeAccDecRatio(sessions);
-  const validAccDec = accDecData.filter(d => d.ratio !== null);
-  const lastAccDec = validAccDec.length ? validAccDec[validAccDec.length-1] : null;
+  const metric = ACWR_METRICS.find(m => m.key === metricKey);
+  // Costruisco la serie {label, value} per la metrica scelta, qualunque sia
+  // la fonte — così computeACWRGeneric funziona identica per tutte.
+  const seriesFor = () => {
+    if(metric.source === 'gps'){
+      return sessions.filter(s => !s.isMatch).map(s => ({ label: s.label, value: s[metric.key] || 0 }));
+    }
+    if(metric.source === 'accdec'){
+      return validAccDec.map(d => ({ label: d.label, value: d.ratio }));
+    }
+    if(metric.source === 'srpe'){
+      return srpeEntries || [];
+    }
+    return [];
+  };
+  const loading = metric.source === 'srpe' && srpeEntries === null;
+  const rawSeries = seriesFor();
+  const acwrData = rawSeries.length > 0 ? computeACWRGeneric(rawSeries, 'value').map(d => ({...d, x: d.label})) : [];
+  const last = acwrData.length ? acwrData[acwrData.length-1] : null;
 
   return (
     <div>
-      <div className="grid grid-4" style={{marginBottom:16}}>
-        <div className="card kpi-card">
-          <div className="kpi-value num">{last.acwr}</div>
-          <div className="kpi-label"><InfoLabel paramKey="acwr" label="ACWR attuale (zona ottimale 0.8–1.3)" style={{color:'var(--text-lo)', fontSize:11}}/></div>
-          <span className={"badge " + statusBadge[last.status]} style={{marginTop:10, display:'inline-block'}}>
-            {last.status==='ok'?'Ottimale':last.status==='warn'?'Attenzione':'Rischio alto'}
-          </span>
+      <div className="card" style={{marginBottom:16}}>
+        <div className="card-head">
+          <div className="card-title">ACWR</div>
+          <select value={metricKey} onChange={e=>setMetricKey(e.target.value)} style={{fontSize:12.5}}>
+            {ACWR_METRICS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+          </select>
         </div>
-        <KPICard label="Carico acuto (ultime 7 sessioni)" value={fmt(last.acute,1)} unit="kJ/kg"/>
-        <KPICard label="Carico cronico (ultime 28 sessioni)" value={fmt(last.chronic,1)} unit="kJ/kg"/>
-        <KPICard label="Sessioni analizzate" value={sessions.length} unit=""/>
+
+        {loading ? <LoadingState/> : !last ? (
+          <div className="empty-hint">
+            {metric.source==='srpe' ? 'Nessun dato ancora — servono voci RPE con durata compilata in Carico Interno.' :
+             metric.source==='accdec' ? 'Dati insufficienti (serve almeno una sessione con decelerazioni ad alta intensità registrate).' :
+             'Dati insufficienti per questa metrica.'}
+          </div>
+        ) : (
+          <React.Fragment>
+            <div className="grid grid-4" style={{marginBottom:16, marginTop:4}}>
+              <div className="card kpi-card">
+                <div className="kpi-value num">{last.acwr}</div>
+                <div className="kpi-label" style={{color:'var(--text-lo)', fontSize:11}}>ACWR (zona ottimale 0.8–1.3)</div>
+                <span className={"badge " + statusBadge[last.status]} style={{marginTop:10, display:'inline-block'}}>
+                  {last.status==='ok'?'Ottimale':last.status==='warn'?'Attenzione':'Rischio alto'}
+                </span>
+              </div>
+              <KPICard label="Carico acuto (ultime 7)" value={fmt(last.acute,1)} unit={metric.unit}/>
+              <KPICard label="Carico cronico (ultime 28)" value={fmt(last.chronic,1)} unit={metric.unit}/>
+              <KPICard label="Punti analizzati" value={rawSeries.length} unit=""/>
+            </div>
+            <TrendChart data={acwrData} xKey="x" unit="" yMin={0} yMax={2}
+              series={[{key:'acwr', name:'ACWR — ' + metric.label, color:metric.color}]}
+              refBands={[{y1:0.8, y2:1.3, color:'#A6E22E', opacity:0.08}]}
+              refLines={[{y:1.5, color:'#E15B4E', label:'Rischio alto'}, {y:0.8, color:'#2A3A2E'}, {y:1.3, color:'#2A3A2E'}]}
+            />
+            <div className="legend-row">
+              <div className="legend-item"><span className="legend-swatch" style={{background:'rgba(166,226,46,0.4)'}}></span>Zona ottimale 0.8–1.3</div>
+              <div className="legend-item"><span className="legend-swatch" style={{background:'#E15B4E'}}></span>Soglia rischio 1.5</div>
+            </div>
+            <div className="section-note">
+              {statusText[last.status]} Stessa formula (media mobile 7 vs 28) applicata a "{metric.label}" invece che alla Spesa Energetica.
+              {metric.source==='gps' && ' Solo allenamenti, mai partite.'}
+              {metric.source==='accdec' && ' Basato su NU_AccHI/ND_DecHI, verificato reale per questa squadra il 07/09/2026.'}
+              {metric.source==='srpe' && ' Carico "interno": come il giocatore percepisce lo sforzo, non cosa misura il GPS — confrontalo con la versione su EEE, se divergono molto vale la pena indagare.'}
+            </div>
+          </React.Fragment>
+        )}
       </div>
 
       <div className="card">
-        <div className="card-head"><div className="card-title"><InfoLabel paramKey="acwr" label="Andamento ACWR"/></div></div>
-        <TrendChart data={acwrData} xKey="x" unit="" yMin={0} yMax={2}
-          series={[{key:'acwr', name:'ACWR', color:'#A6E22E'}]}
-          refBands={[{y1:0.8, y2:1.3, color:'#A6E22E', opacity:0.08}]}
-          refLines={[{y:1.5, color:'#E15B4E', label:'Rischio alto'}, {y:0.8, color:'#2A3A2E'}, {y:1.3, color:'#2A3A2E'}]}
-        />
-        <div className="legend-row">
-          <div className="legend-item"><span className="legend-swatch" style={{background:'rgba(166,226,46,0.4)'}}></span>Zona ottimale 0.8–1.3</div>
-          <div className="legend-item"><span className="legend-swatch" style={{background:'#E15B4E'}}></span>Soglia rischio 1.5</div>
-        </div>
-        <div className="section-note">{statusText[last.status]} Calcolato sulla Spesa Energetica (EEE, kJ/kg), l'indicatore di carico usato da K-Sport nel proprio portale.</div>
-      </div>
-
-      <div className="card" style={{marginTop:16}}>
-        <div className="card-head"><div className="card-title">Rapporto Acc/Dec (alta intensità)</div></div>
+        <div className="card-head"><div className="card-title">Rapporto Acc/Dec (alta intensità) — dettaglio</div></div>
         {validAccDec.length === 0 ? (
           <div className="empty-hint">Dati insufficienti (serve almeno una sessione con decelerazioni ad alta intensità registrate).</div>
         ) : (
@@ -2176,7 +2245,7 @@ function CaricoTab({sessions}){
               <div className="legend-item"><span className="legend-swatch" style={{background:'#E15B4E'}}></span>Riferimento alto 0,9</div>
             </div>
             <div className="section-note" style={{marginTop:8}}>
-              NU_AccHI (numero di accelerazioni forti, sopra ~2,9 m/s²) diviso ND_DecHI (numero di decelerazioni forti, sotto ~-2,9 m/s²) nella sessione. La fascia 0,7-0,8 e la soglia 0,9 sono un riferimento generico di partenza (non uno standard validato specificamente per il vostro sport/squadra) — usalo per farti un'idea, ma il segnale più affidabile resta il <b>trend nel tempo dello stesso giocatore</b>: un rapporto che sale nel tempo può indicare meno tolleranza alla frenata rispetto all'accelerazione. Conferma sempre con altri segnali (RPE, GRQ in Carico Interno) prima di trarre conclusioni.
+              NU_AccHI (numero di accelerazioni forti, sopra ~2,9 m/s²) diviso ND_DecHI (numero di decelerazioni forti, sotto ~-2,9 m/s²) nella sessione, sessione per sessione — non media mobile. Per la versione ACWR (acuto/cronico) di questo stesso rapporto, selezionala nel menu del pannello sopra.
             </div>
           </React.Fragment>
         )}
@@ -4030,7 +4099,7 @@ function PerformancePage({initialPlayer}){
             {playerTab === 'unoauno' ? <UnoAUnoView/> :
              sessions === null ? <LoadingState/> :
              playerTab==='panoramica' ? <PanoramicaTab sessions={sessions}/> :
-             playerTab==='carico' ? <CaricoTab sessions={sessions}/> :
+             playerTab==='carico' ? <CaricoTab sessions={sessions} playerName={selectedName}/> :
              playerTab==='settimane' ? <WeekCompareTab sessions={sessions}/> :
              <StoricoTab sessions={sessions}/>
             }
@@ -6996,7 +7065,7 @@ function AthleteView({token}){
                   ))}
                 </div>
                 {playerTab==='panoramica' ? <PanoramicaTab sessions={sessions}/> :
-                 playerTab==='carico' ? <CaricoTab sessions={sessions}/> :
+                 playerTab==='carico' ? <CaricoTab sessions={sessions} playerName={playerName}/> :
                  <StoricoTab sessions={sessions}/>}
               </div>
             )
@@ -7159,7 +7228,7 @@ function PrivatePhysioView({token}){
                     ))}
                   </div>
                   {playerTab==='panoramica' ? <PanoramicaTab sessions={sessions}/> :
-                   playerTab==='carico' ? <CaricoTab sessions={sessions}/> :
+                   playerTab==='carico' ? <CaricoTab sessions={sessions} playerName={playerName}/> :
                    <StoricoTab sessions={sessions}/>}
                 </div>
               )
