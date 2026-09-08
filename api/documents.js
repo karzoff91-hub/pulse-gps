@@ -1,0 +1,548 @@
+// /api/documents.js
+// Documenti per giocatore (diagnosi, esami clinici/strumentali) — PDF o immagini.
+// Gestisce anche le foto profilo dei giocatori (stesso store, tabella separata).
+// Lo store Vercel Blob è PRIVATO: i file non sono raggiungibili con un link
+// diretto, servono sempre le credenziali del server. Per questo la vista e
+// il download passano da questa stessa funzione (?download=1), non da un
+// link diretto al file.
+// GET    -> ?playerName=... lista documenti di un giocatore
+//        -> ?id=123&download=1 restituisce il file vero e proprio
+//        -> ?resource=photo&playerName=...&download=1 restituisce la foto profilo
+//        -> ?resource=seasons elenca tutte le stagioni
+//        -> ?resource=drillgroups elenca i gruppi di esercitazioni (Small SG, ecc.)
+//        -> ?resource=drilltypes elenca i tipi canonici (con gruppo assegnato)
+//        -> ?resource=drillaliases elenca i nomi grezzi uniti a un tipo canonico
+// POST   -> { playerName, docType, title, fileBase64, fileName, mimeType } carica un file
+//        -> { playerName, isPhoto:true, fileBase64, fileName, mimeType } carica/sostituisce la foto profilo
+//        -> { resource:'season', action:'create', name, startDate, endDate } crea una stagione
+//        -> { resource:'season', action:'set_current', id } imposta la stagione corrente
+//        -> { resource:'drillgroup', action:'create', name, note } crea un gruppo esercitazioni
+//        -> { resource:'drilltype', action:'setgroup', canonicalName, groupId } assegna un tipo a un gruppo
+//        -> { resource:'drilltype', action:'alias', rawName, canonicalName } unisce un nome grezzo a un tipo
+// PATCH  -> { id, mode } genera l'analisi/estrazione IA del documento
+// DELETE -> ?id=123
+//        -> ?resource=season&id=123 elimina una stagione
+//        -> ?resource=drillgroup&id=123 elimina un gruppo (i tipi restano, senza gruppo)
+//        -> ?resource=drillalias&rawName=... annulla l'unione di un nome grezzo
+
+import { put, del } from '@vercel/blob';
+import pg from 'pg';
+const { Pool } = pg;
+
+let pool;
+function getPool(){
+  if(!pool){
+    pool = new Pool({ connectionString: process.env.POSTGRES_URL, ssl: { rejectUnauthorized: false } });
+  }
+  return pool;
+}
+
+async function ensureTable(client){
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS player_documents (
+      id SERIAL PRIMARY KEY,
+      player_name TEXT NOT NULL,
+      doc_type TEXT NOT NULL,
+      title TEXT,
+      blob_url TEXT NOT NULL,
+      mime_type TEXT,
+      uploaded_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  await client.query(`ALTER TABLE player_documents ADD COLUMN IF NOT EXISTS mime_type TEXT;`);
+  await client.query(`ALTER TABLE player_documents ADD COLUMN IF NOT EXISTS ai_summary TEXT;`);
+  await client.query(`ALTER TABLE player_documents ADD COLUMN IF NOT EXISTS injury_id INTEGER;`);
+  await client.query(`ALTER TABLE player_documents ADD COLUMN IF NOT EXISTS extracted_text TEXT;`);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS player_photos (
+      player_name TEXT PRIMARY KEY,
+      blob_url TEXT NOT NULL,
+      mime_type TEXT,
+      uploaded_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS player_profile (
+      player_name TEXT PRIMARY KEY,
+      height_cm NUMERIC,
+      weight_kg NUMERIC,
+      age INTEGER,
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS seasons (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      start_date DATE NOT NULL,
+      end_date DATE,
+      is_current BOOLEAN DEFAULT false,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS drill_groups (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      note TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS drill_types (
+      canonical_name TEXT PRIMARY KEY,
+      group_id INTEGER REFERENCES drill_groups(id) ON DELETE SET NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS drill_aliases (
+      raw_name TEXT PRIMARY KEY,
+      canonical_name TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  await client.query(`ALTER TABLE drill_types ADD COLUMN IF NOT EXISTS hidden BOOLEAN DEFAULT false;`);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS drill_ignored_sessions (
+      session_id TEXT PRIMARY KEY,
+      canonical_name TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS drill_ai_comments (
+      session_id TEXT PRIMARY KEY,
+      canonical_name TEXT,
+      comment TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+}
+
+// I blob dello store privato richiedono il token nell'header Authorization
+// per essere letti, anche lato server.
+async function fetchPrivateBlob(url){
+  return fetch(url, { headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` } });
+}
+
+export default async function handler(req, res) {
+  const client = getPool();
+  try {
+    await ensureTable(client);
+
+    if (req.method === 'GET' && req.query.resource === 'seasons') {
+      const { rows } = await client.query('SELECT * FROM seasons ORDER BY start_date DESC');
+      return res.status(200).json({ Result: 'OK', Seasons: rows });
+    }
+
+    if (req.method === 'GET' && req.query.resource === 'drillgroups') {
+      const { rows } = await client.query('SELECT * FROM drill_groups ORDER BY name');
+      return res.status(200).json({ Result: 'OK', Groups: rows });
+    }
+
+    if (req.method === 'GET' && req.query.resource === 'drilltypes') {
+      const { rows } = await client.query('SELECT * FROM drill_types');
+      return res.status(200).json({ Result: 'OK', Types: rows });
+    }
+
+    if (req.method === 'GET' && req.query.resource === 'drillaliases') {
+      const { rows } = await client.query('SELECT * FROM drill_aliases');
+      return res.status(200).json({ Result: 'OK', Aliases: rows });
+    }
+
+    if (req.method === 'GET' && req.query.resource === 'drillignoredsessions') {
+      const { rows } = await client.query('SELECT * FROM drill_ignored_sessions');
+      return res.status(200).json({ Result: 'OK', Ignored: rows });
+    }
+
+    if (req.method === 'GET' && req.query.resource === 'drillaicomments') {
+      const { rows } = await client.query('SELECT * FROM drill_ai_comments');
+      return res.status(200).json({ Result: 'OK', Comments: rows });
+    }
+
+    if (req.method === 'GET' && req.query.resource === 'profile') {
+      const { playerName } = req.query;
+      if (!playerName) return res.status(400).json({ error: 'Parametro playerName mancante.' });
+      const { rows } = await client.query('SELECT * FROM player_profile WHERE player_name = $1', [playerName]);
+      return res.status(200).json({ Result: 'OK', Profile: rows[0] || null });
+    }
+
+    if (req.method === 'GET' && req.query.resource === 'photo') {
+      const { playerName } = req.query;
+      if (!playerName) return res.status(400).json({ error: 'Parametro playerName mancante.' });
+      const { rows } = await client.query('SELECT * FROM player_photos WHERE player_name = $1', [playerName]);
+      const photo = rows[0];
+      if (!photo) return res.status(404).json({ error: 'Nessuna foto per questo giocatore.' });
+      if (req.query.download) {
+        const fileRes = await fetchPrivateBlob(photo.blob_url);
+        if (!fileRes.ok) return res.status(502).json({ error: 'Impossibile scaricare la foto.' });
+        const buffer = Buffer.from(await fileRes.arrayBuffer());
+        res.setHeader('Content-Type', photo.mime_type || 'image/jpeg');
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        return res.status(200).send(buffer);
+      }
+      return res.status(200).json({ Result: 'OK', hasPhoto: true });
+    }
+
+    if (req.method === 'GET' && req.query.download && req.query.id) {
+      const { rows } = await client.query('SELECT blob_url, mime_type, title FROM player_documents WHERE id = $1', [req.query.id]);
+      const doc = rows[0];
+      if (!doc) return res.status(404).json({ error: 'Documento non trovato.' });
+      const fileRes = await fetchPrivateBlob(doc.blob_url);
+      if (!fileRes.ok) return res.status(502).json({ error: 'Impossibile scaricare il documento.' });
+      const buffer = Buffer.from(await fileRes.arrayBuffer());
+      res.setHeader('Content-Type', doc.mime_type || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${(doc.title||'documento').replace(/"/g,'')}"`);
+      return res.status(200).send(buffer);
+    }
+
+    if (req.method === 'GET') {
+      const { playerName } = req.query;
+      if (!playerName) return res.status(400).json({ error: 'Parametro playerName mancante.' });
+      const { rows } = await client.query(
+        'SELECT * FROM player_documents WHERE player_name = $1 ORDER BY uploaded_at DESC',
+        [playerName]
+      );
+      return res.status(200).json({ Result: 'OK', Documents: rows });
+    }
+
+    if (req.method === 'POST' && req.body && req.body.resource === 'season') {
+      const { action, id, name, startDate, endDate } = req.body;
+
+      if (action === 'create') {
+        if (!name || !startDate) return res.status(400).json({ error: 'Nome e data di inizio sono obbligatori.' });
+        const { rows: countRows } = await client.query('SELECT COUNT(*) FROM seasons');
+        const isFirst = Number(countRows[0].count) === 0;
+        if (isFirst) {
+          // La prima stagione creata diventa automaticamente quella corrente.
+          const { rows } = await client.query(
+            'INSERT INTO seasons (name, start_date, end_date, is_current) VALUES ($1, $2, $3, true) RETURNING *',
+            [name, startDate, endDate || null]
+          );
+          return res.status(200).json({ Result: 'OK', Season: rows[0] });
+        }
+        const { rows } = await client.query(
+          'INSERT INTO seasons (name, start_date, end_date, is_current) VALUES ($1, $2, $3, false) RETURNING *',
+          [name, startDate, endDate || null]
+        );
+        return res.status(200).json({ Result: 'OK', Season: rows[0] });
+      }
+
+      if (action === 'set_current') {
+        if (!id) return res.status(400).json({ error: 'Parametro id mancante.' });
+        await client.query('UPDATE seasons SET is_current = false');
+        const { rows } = await client.query('UPDATE seasons SET is_current = true WHERE id = $1 RETURNING *', [id]);
+        return res.status(200).json({ Result: 'OK', Season: rows[0] });
+      }
+
+      return res.status(400).json({ error: 'Azione non riconosciuta.' });
+    }
+
+    if (req.method === 'DELETE' && req.query.resource === 'season') {
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: 'Parametro id mancante.' });
+      await client.query('DELETE FROM seasons WHERE id = $1', [id]);
+      return res.status(200).json({ Result: 'OK' });
+    }
+
+    if (req.method === 'POST' && req.body && req.body.resource === 'drillgroup') {
+      const { action, id, name, note } = req.body;
+      if (action === 'create') {
+        if (!name) return res.status(400).json({ error: 'Nome del gruppo obbligatorio.' });
+        const { rows } = await client.query(
+          'INSERT INTO drill_groups (name, note) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING RETURNING *',
+          [name.trim(), note || null]
+        );
+        if (rows.length === 0) return res.status(400).json({ error: 'Esiste già un gruppo con questo nome.' });
+        return res.status(200).json({ Result: 'OK', Group: rows[0] });
+      }
+      return res.status(400).json({ error: 'Azione non riconosciuta.' });
+    }
+
+    if (req.method === 'DELETE' && req.query.resource === 'drillgroup') {
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: 'Parametro id mancante.' });
+      // I tipi che appartenevano a questo gruppo restano, solo "senza gruppo"
+      // (il vincolo ON DELETE SET NULL lo fa automaticamente).
+      await client.query('DELETE FROM drill_groups WHERE id = $1', [id]);
+      return res.status(200).json({ Result: 'OK' });
+    }
+
+    if (req.method === 'POST' && req.body && req.body.resource === 'drilltype') {
+      const { action, canonicalName, groupId, rawName } = req.body;
+
+      if (action === 'setgroup') {
+        if (!canonicalName) return res.status(400).json({ error: 'canonicalName obbligatorio.' });
+        const { rows } = await client.query(
+          `INSERT INTO drill_types (canonical_name, group_id) VALUES ($1, $2)
+           ON CONFLICT (canonical_name) DO UPDATE SET group_id = $2 RETURNING *`,
+          [canonicalName, groupId || null]
+        );
+        return res.status(200).json({ Result: 'OK', Type: rows[0] });
+      }
+
+      if (action === 'alias') {
+        // Unisce un nome "grezzo" (magari scritto male) a un tipo canonico
+        // già esistente — d'ora in poi ogni occorrenza di quel nome grezzo
+        // verrà contata dentro il tipo canonico indicato.
+        if (!rawName || !canonicalName) return res.status(400).json({ error: 'rawName e canonicalName obbligatori.' });
+        await client.query(
+          `INSERT INTO drill_types (canonical_name) VALUES ($1) ON CONFLICT (canonical_name) DO NOTHING`,
+          [canonicalName]
+        );
+        const { rows } = await client.query(
+          `INSERT INTO drill_aliases (raw_name, canonical_name) VALUES ($1, $2)
+           ON CONFLICT (raw_name) DO UPDATE SET canonical_name = $2 RETURNING *`,
+          [rawName, canonicalName]
+        );
+        return res.status(200).json({ Result: 'OK', Alias: rows[0] });
+      }
+
+      if (action === 'sethidden') {
+        if (!canonicalName) return res.status(400).json({ error: 'canonicalName obbligatorio.' });
+        const { hidden } = req.body;
+        const { rows } = await client.query(
+          `INSERT INTO drill_types (canonical_name, hidden) VALUES ($1, $2)
+           ON CONFLICT (canonical_name) DO UPDATE SET hidden = $2 RETURNING *`,
+          [canonicalName, !!hidden]
+        );
+        return res.status(200).json({ Result: 'OK', Type: rows[0] });
+      }
+
+      return res.status(400).json({ error: 'Azione non riconosciuta.' });
+    }
+
+    if (req.method === 'POST' && req.body && req.body.resource === 'drillsession') {
+      const { action, sessionId, canonicalName } = req.body;
+      if (action === 'ignore') {
+        if (!sessionId) return res.status(400).json({ error: 'sessionId obbligatorio.' });
+        const { rows } = await client.query(
+          `INSERT INTO drill_ignored_sessions (session_id, canonical_name) VALUES ($1, $2)
+           ON CONFLICT (session_id) DO NOTHING RETURNING *`,
+          [String(sessionId), canonicalName || null]
+        );
+        return res.status(200).json({ Result: 'OK', Ignored: rows[0] || null });
+      }
+      return res.status(400).json({ error: 'Azione non riconosciuta.' });
+    }
+
+    if (req.method === 'POST' && req.body && req.body.resource === 'drillaicomment') {
+      const { action, sessionId, canonicalName, comment } = req.body;
+      if (action === 'save') {
+        if (!sessionId || !comment) return res.status(400).json({ error: 'sessionId e comment obbligatori.' });
+        const { rows } = await client.query(
+          `INSERT INTO drill_ai_comments (session_id, canonical_name, comment) VALUES ($1, $2, $3)
+           ON CONFLICT (session_id) DO UPDATE SET comment = $3, canonical_name = $2, created_at = NOW() RETURNING *`,
+          [String(sessionId), canonicalName || null, comment]
+        );
+        return res.status(200).json({ Result: 'OK', Comment: rows[0] });
+      }
+      return res.status(400).json({ error: 'Azione non riconosciuta.' });
+    }
+
+    if (req.method === 'DELETE' && req.query.resource === 'drillsession') {
+      const { sessionId } = req.query;
+      if (!sessionId) return res.status(400).json({ error: 'Parametro sessionId mancante.' });
+      await client.query('DELETE FROM drill_ignored_sessions WHERE session_id = $1', [String(sessionId)]);
+      return res.status(200).json({ Result: 'OK' });
+    }
+
+    if (req.method === 'DELETE' && req.query.resource === 'drillaicomment') {
+      const { sessionId } = req.query;
+      if (!sessionId) return res.status(400).json({ error: 'Parametro sessionId mancante.' });
+      await client.query('DELETE FROM drill_ai_comments WHERE session_id = $1', [String(sessionId)]);
+      return res.status(200).json({ Result: 'OK' });
+    }
+
+    if (req.method === 'DELETE' && req.query.resource === 'drillalias') {
+      const { rawName } = req.query;
+      if (!rawName) return res.status(400).json({ error: 'Parametro rawName mancante.' });
+      await client.query('DELETE FROM drill_aliases WHERE raw_name = $1', [rawName]);
+      return res.status(200).json({ Result: 'OK' });
+    }
+
+    if (req.method === 'POST' && req.body && req.body.isProfile) {
+      const { playerName, heightCm, weightKg, age, token } = req.body;
+      if (!playerName) return res.status(400).json({ error: 'playerName obbligatorio.' });
+      if (token) {
+        // Chiamata dal link personale dell'atleta: verifica che il token
+        // corrisponda davvero a questo giocatore, prima di consentire la modifica.
+        try {
+          const { rows: tokenRows } = await client.query('SELECT player_name FROM player_tokens WHERE token = $1', [token]);
+          if (tokenRows.length === 0 || tokenRows[0].player_name !== playerName) {
+            return res.status(403).json({ error: 'Non autorizzato a modificare questo profilo.' });
+          }
+        } catch (e) {
+          return res.status(403).json({ error: 'Non autorizzato a modificare questo profilo.' });
+        }
+      }
+      await client.query(
+        `INSERT INTO player_profile (player_name, height_cm, weight_kg, age) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (player_name) DO UPDATE SET height_cm = $2, weight_kg = $3, age = $4, updated_at = NOW()`,
+        [playerName, heightCm || null, weightKg || null, age || null]
+      );
+      return res.status(200).json({ Result: 'OK' });
+    }
+
+    if (req.method === 'POST' && req.body && req.body.isPhoto) {
+      const { playerName, fileBase64, fileName, mimeType } = req.body;
+      if (!playerName || !fileBase64 || !fileName) {
+        return res.status(400).json({ error: 'playerName, fileBase64 e fileName sono obbligatori.' });
+      }
+      const buffer = Buffer.from(fileBase64, 'base64');
+      if (buffer.length > 4 * 1024 * 1024) {
+        return res.status(400).json({ error: 'File troppo grande (limite 4 MB).' });
+      }
+      const finalMime = mimeType || 'image/jpeg';
+
+      const { rows: existing } = await client.query('SELECT blob_url FROM player_photos WHERE player_name = $1', [playerName]);
+      if (existing[0]) {
+        try { await del(existing[0].blob_url); } catch(e) { /* ignora */ }
+      }
+
+      let blob;
+      try {
+        blob = await put(`photos/${playerName}/${Date.now()}-${fileName}`, buffer, { access: 'private', contentType: finalMime });
+      } catch (blobErr) {
+        return res.status(500).json({ error: 'Blob Store non collegato o non autorizzato.', details: blobErr.message });
+      }
+
+      await client.query(
+        `INSERT INTO player_photos (player_name, blob_url, mime_type) VALUES ($1, $2, $3)
+         ON CONFLICT (player_name) DO UPDATE SET blob_url = $2, mime_type = $3, uploaded_at = NOW()`,
+        [playerName, blob.url, finalMime]
+      );
+      return res.status(200).json({ Result: 'OK' });
+    }
+
+    if (req.method === 'POST') {
+      const { playerName, docType, title, fileBase64, fileName, mimeType, injuryId, extractedText } = req.body || {};
+      if (!playerName || !docType || !fileBase64 || !fileName) {
+        return res.status(400).json({ error: 'playerName, docType, fileBase64 e fileName sono obbligatori.' });
+      }
+      const buffer = Buffer.from(fileBase64, 'base64');
+      if (buffer.length > 4 * 1024 * 1024) {
+        return res.status(400).json({ error: 'File troppo grande (limite 4 MB).' });
+      }
+      const finalMime = mimeType || 'application/pdf';
+
+      let blob;
+      try {
+        blob = await put(`documents/${playerName}/${Date.now()}-${fileName}`, buffer, {
+          access: 'private',
+          contentType: finalMime,
+        });
+      } catch (blobErr) {
+        return res.status(500).json({ error: 'Blob Store non collegato o non autorizzato.', details: blobErr.message });
+      }
+
+      const { rows } = await client.query(
+        `INSERT INTO player_documents (player_name, doc_type, title, blob_url, mime_type, injury_id, extracted_text) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [playerName, docType, title || fileName, blob.url, finalMime, injuryId || null, extractedText || null]
+      );
+      return res.status(200).json({ Result: 'OK', Document: rows[0] });
+    }
+
+    if (req.method === 'PATCH') {
+      const { id, mode, extractedText } = req.body || {};
+      if (!id) return res.status(400).json({ error: 'Parametro id mancante.' });
+
+      if (mode === 'update_text') {
+        if (extractedText === undefined) return res.status(400).json({ error: 'extractedText mancante.' });
+        const { rows } = await client.query('UPDATE player_documents SET extracted_text = $1 WHERE id = $2 RETURNING *', [extractedText, id]);
+        return res.status(200).json({ Result: 'OK', Document: rows[0] });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY non configurata su Vercel.' });
+
+      const { rows: docRows } = await client.query('SELECT * FROM player_documents WHERE id = $1', [id]);
+      const doc = docRows[0];
+      if (!doc) return res.status(404).json({ error: 'Documento non trovato.' });
+
+      // Se il documento ha un testo estratto (tipicamente da un Excel letto
+      // nel browser), lo usiamo direttamente invece di inviare il file
+      // grezzo all'IA, che non sa leggere .xlsx nativamente.
+      let contentBlock;
+      if (doc.extracted_text) {
+        contentBlock = { text: `Contenuto del file (tabella):\n${doc.extracted_text}` };
+      } else {
+        const fileRes = await fetchPrivateBlob(doc.blob_url);
+        if (!fileRes.ok) return res.status(502).json({ error: 'Impossibile scaricare il documento per l\'analisi.' });
+        const arrayBuffer = await fileRes.arrayBuffer();
+        const base64 = Buffer.from(arrayBuffer).toString('base64');
+        const mime = doc.mime_type || fileRes.headers.get('content-type') || 'application/pdf';
+        contentBlock = { inline_data: { mime_type: mime, data: base64 } };
+      }
+
+      const isExtract = mode === 'extract';
+      const prompt = isExtract
+        ? `Analizza questo documento (${doc.doc_type}, giocatore ${doc.player_name}) ed estrai TUTTI i singoli test, misurazioni o valori numerici che contiene (es. forza muscolare, ROM articolare, test funzionali, punteggi, ecc.).
+Rispondi SOLO con un array JSON valido, senza testo prima o dopo, senza markdown, in questo formato esatto:
+[{"testName":"nome del test","value":"valore numerico o testuale","unit":"unità di misura o vuoto"}]
+Se il documento non contiene test/misurazioni identificabili, rispondi con un array vuoto: []`
+        : `Sei un assistente di supporto per uno staff medico/atletico sportivo. Analizza questo documento (${doc.doc_type}, riguardante il giocatore ${doc.player_name}) e fornisci in italiano, in massimo 6-8 frasi:
+1) una sintesi dei contenuti principali;
+2) possibili implicazioni pratiche per l'allenamento e la riabilitazione del giocatore.
+Resta un supporto informativo: non fornire una diagnosi medica formale e non sostituire il parere di un professionista sanitario.`;
+
+      let aiRes, aiData;
+      try {
+        aiRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { text: prompt },
+                  contentBlock,
+                ],
+              }],
+            }),
+          }
+        );
+        aiData = await aiRes.json();
+      } catch (err) {
+        return res.status(500).json({ error: 'Errore nella chiamata al servizio AI', details: err.message });
+      }
+      if (!aiRes.ok) {
+        return res.status(502).json({ error: 'Errore dal servizio AI', details: aiData.error?.message || 'sconosciuto' });
+      }
+      const rawText = (aiData.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+
+      if (isExtract) {
+        const cleaned = rawText.replace(/^```json\s*/i, '').replace(/^```\s*/,'').replace(/```\s*$/,'').trim();
+        let extracted;
+        try {
+          extracted = JSON.parse(cleaned);
+          if (!Array.isArray(extracted)) throw new Error('Formato inatteso');
+        } catch (e) {
+          return res.status(502).json({ error: 'L\'IA non è riuscita a estrarre i dati in modo leggibile.', details: rawText.slice(0,300) });
+        }
+        return res.status(200).json({ Result: 'OK', extracted });
+      }
+
+      const summary = rawText;
+      await client.query('UPDATE player_documents SET ai_summary = $1 WHERE id = $2', [summary, id]);
+      return res.status(200).json({ Result: 'OK', summary });
+    }
+
+    if (req.method === 'DELETE') {
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: 'Parametro id mancante.' });
+      const { rows } = await client.query('SELECT blob_url FROM player_documents WHERE id = $1', [id]);
+      if (rows[0]) {
+        try { await del(rows[0].blob_url); } catch(e) { /* ignora se già rimosso */ }
+      }
+      await client.query('DELETE FROM player_documents WHERE id = $1', [id]);
+      return res.status(200).json({ Result: 'OK' });
+    }
+
+    res.status(405).json({ error: 'Metodo non supportato.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Errore nel salvataggio del documento', details: err.message });
+  }
+}
