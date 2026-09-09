@@ -1028,6 +1028,7 @@ async function loadTeamSessions(){
         players[name] = {
           distance,
           eee: p.EEE || 0,
+          durationMin,
           maxSpeedKmh: (p.Smax || 0) * 3.6,
           distPerMin: p.Drel || (durationMin > 0 ? distance / durationMin : 0),
           pctHi: p['%D_SHI'] || 0,
@@ -4358,8 +4359,9 @@ function computeLoadAlerts(teamSessions){
    ================================================================= */
 
 /* Tutte le metriche GPS disponibili per sessione (quelle che loadTeamSessions
-   mette in players[name]) — l'indice è la media PESATA della variazione %
-   su TUTTI questi dati insieme. Pesi motivati dalla letteratura (non tutte
+   mette in players[name]) — usate per il GPI (partita), che resta sui 14
+   parametri completi. L'indice è la media PESATA della variazione % su
+   TUTTI questi dati insieme. Pesi motivati dalla letteratura (non tutte
    le metriche sono ugualmente affidabili settimana su settimana):
    - peso 3: distanza, EEE, Drel — CV settimanale ~19-20%, le più stabili
      (Martín-García et al. 2018) e le uniche con associazione significativa
@@ -4373,23 +4375,38 @@ function computeLoadAlerts(teamSessions){
      (Martín-García et al. 2018), nessuna associazione significativa con la
      prontezza (Mandorino et al. 2024): le più soggette a variazioni % enormi
      e poco informative su un singolo dato isolato (es. uno sprint in più) */
-const PI_METRIC_WEIGHTS = {
+const PI_GAME_METRIC_WEIGHTS = {
   distance: 3, eee: 3, distPerMin: 3,
   zoneS4: 2, zoneS5: 2,
   accHiDistance: 1.5, decHiDistance: 1.5, nuAccHI: 1.5, ndDecHI: 1.5,
   maxSpeedKmh: 0.5, pctHi: 0.5, hiDistance: 0.5, zoneS6: 0.5, zoneS7: 0.5,
 };
-const PI_COMPOSITE_KEYS = Object.keys(PI_METRIC_WEIGHTS);
-
-/* Etichette brevi per mostrare quali metriche sono entrate nel calcolo —
-   trasparenza: se una settimana manca di dati per una metrica (es. nessuna
-   sessione con zona S7 attiva), quella metrica va esclusa sia dal calcolo
-   sia contata come "non disponibile", non ignorata silenziosamente. */
-const PI_METRIC_LABELS = {
+const PI_GAME_COMPOSITE_KEYS = Object.keys(PI_GAME_METRIC_WEIGHTS);
+const PI_GAME_METRIC_LABELS = {
   distance: 'Distanza', eee: 'EEE', distPerMin: 'Drel',
   zoneS4: 'Zona S4', zoneS5: 'Zona S5',
   accHiDistance: 'Dist. Acc', decHiDistance: 'Dist. Dec', nuAccHI: 'Acc (n)', ndDecHI: 'Dec (n)',
   maxSpeedKmh: 'Vel.max', pctHi: '%D>15,9', hiDistance: 'D>15,9', zoneS6: 'Zona S6', zoneS7: 'Zona S7',
+};
+
+/* Set ridotto e specifico per il TPI (allenamento) — a differenza del GPI,
+   qui non si usano tutti i 14 dati GPS ma solo 7 metriche scelte a mano:
+   volume (distanza, Drel, durata), i due conteggi Acc/Dec separati (non il
+   loro rapporto), la velocità massima e la distanza sopra i 20 km/h (somma
+   delle zone S5+S6+S7, non disponibile come campo unico su K-Sport). Pesi
+   sulla stessa logica del set completo: 3 per le metriche di volume più
+   stabili, 1.5 per i conteggi Acc/Dec, 0.5 per le due metriche di velocità
+   di punta, intrinsecamente più rumorose. */
+const PI_TRAINING_METRIC_WEIGHTS = {
+  distance: 3, distPerMin: 3, durationMin: 3,
+  nuAccHI: 1.5, ndDecHI: 1.5,
+  maxSpeedKmh: 0.5, distV20: 0.5,
+};
+const PI_TRAINING_COMPOSITE_KEYS = Object.keys(PI_TRAINING_METRIC_WEIGHTS);
+const PI_TRAINING_METRIC_LABELS = {
+  distance: 'Distanza', distPerMin: 'Drel', durationMin: 'Tempo allen.',
+  nuAccHI: 'N. Acc', ndDecHI: 'N. Dec',
+  maxSpeedKmh: 'Vel.max', distV20: 'DistV >20 km/h',
 };
 
 function piAvgFor(list, key){
@@ -4397,27 +4414,30 @@ function piAvgFor(list, key){
   return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
 }
 
-function computeCompositePct(currentGroup, compareGroup){
+function computeCompositePct(currentGroup, compareGroup, keys, weights, labels){
+  const useKeys = keys || PI_GAME_COMPOSITE_KEYS;
+  const useWeights = weights || PI_GAME_METRIC_WEIGHTS;
+  const useLabels = labels || PI_GAME_METRIC_LABELS;
   if(!currentGroup.length || !compareGroup.length) return null;
   let weightedSum = 0, weightTotal = 0;
   const excluded = [];
   const breakdown = [];
-  PI_COMPOSITE_KEYS.forEach(k => {
+  useKeys.forEach(k => {
     const cur = piAvgFor(currentGroup, k);
     const prev = piAvgFor(compareGroup, k);
-    if(cur === null || prev === null || prev <= 0){ excluded.push(PI_METRIC_LABELS[k]); return; }
+    if(cur === null || prev === null || prev <= 0){ excluded.push(useLabels[k]); return; }
     const diffPct = ((cur - prev) / prev) * 100;
-    const w = PI_METRIC_WEIGHTS[k];
+    const w = useWeights[k];
     weightedSum += w * diffPct;
     weightTotal += w;
-    breakdown.push({ key:k, label:PI_METRIC_LABELS[k], cur, prev, diffPct, weight:w });
+    breakdown.push({ key:k, label:useLabels[k], cur, prev, diffPct, weight:w });
   });
   if(weightTotal === 0) return null;
   breakdown.sort((a,b) => b.weight - a.weight);
   return {
     pct: weightedSum / weightTotal,
-    usedCount: PI_COMPOSITE_KEYS.length - excluded.length,
-    totalCount: PI_COMPOSITE_KEYS.length,
+    usedCount: useKeys.length - excluded.length,
+    totalCount: useKeys.length,
     excluded,
     breakdown,
   };
@@ -4426,11 +4446,8 @@ function computeCompositePct(currentGroup, compareGroup){
 /* TPI: variazione della settimana con l'ultimo dato disponibile del
    giocatore rispetto alla media delle (fino a) 3 settimane precedenti
    con dati — parte sempre dall'ultimo dato reale, non dalla settimana
-   di calendario corrente. Solo allenamenti. */
-/* TPI: variazione della settimana con l'ultimo dato disponibile del
-   giocatore rispetto alla media delle (fino a) 3 settimane precedenti
-   con dati — parte sempre dall'ultimo dato reale, non dalla settimana
-   di calendario corrente. Solo allenamenti.
+   di calendario corrente. Solo allenamenti, sul set ridotto di 7 metriche
+   (vedi PI_TRAINING_METRIC_WEIGHTS) invece dei 14 completi usati dal GPI.
    Se la settimana corrente è ancora "in corso" (oggi cade dentro quella
    settimana solare) e ha finora meno sedute di una settimana intera,
    confronto solo le PRIME N sedute delle 3 settimane precedenti — stesso
@@ -4443,7 +4460,13 @@ function computeCompositePct(currentGroup, compareGroup){
 function computeTPI(playerName, teamTrainingSessions){
   const rows = teamTrainingSessions
     .filter(s => s.players[playerName])
-    .map(s => ({ dateObj: new Date(s.dateUnix*1000), ...s.players[playerName] }))
+    .map(s => {
+      const p = s.players[playerName];
+      return {
+        dateObj: new Date(s.dateUnix*1000), ...p,
+        distV20: (p.zoneS5||0) + (p.zoneS6||0) + (p.zoneS7||0),
+      };
+    })
     .sort((a,b)=>a.dateObj-b.dateObj);
   if(rows.length < 2) return null;
   const weekGroups = {};
@@ -4461,7 +4484,7 @@ function computeTPI(playerName, teamTrainingSessions){
   const matchCount = isCurrentWeekOngoing ? currentWeek.length : null;
   const prevWeekKeys = weekKeys.slice(Math.max(0, weekKeys.length-4), weekKeys.length-1);
   const prevWeeks = prevWeekKeys.flatMap(k => matchCount ? weekGroups[k].slice(0, matchCount) : weekGroups[k]);
-  const composite = computeCompositePct(currentWeek, prevWeeks);
+  const composite = computeCompositePct(currentWeek, prevWeeks, PI_TRAINING_COMPOSITE_KEYS, PI_TRAINING_METRIC_WEIGHTS, PI_TRAINING_METRIC_LABELS);
   return composite === null ? null : { ...composite, weeksUsed: prevWeekKeys.length, matchedSessions: matchCount };
 }
 
@@ -4797,7 +4820,7 @@ function PerformanceIndexCard({players, teamSessions, injuries}){
         </div>
       )}
       <div className="section-note" style={{marginTop:10}}>
-        TPI/GPI = media <b>pesata</b> della variazione % su tutti i dati GPS della sessione (peso maggiore a distanza/EEE/Drel, minore a D&gt;15,9/sprint/zone alte — le più rumorose in letteratura), rispettivamente dell'ultima settimana o dell'ultima partita con dati, contro la media delle 3 precedenti — bianco entro ±10% (nessuna variazione rilevante), giallo oltre +10% (attenzione: un aumento non è automaticamente positivo), rosso sotto -10%. Il numero di metriche effettivamente usate e il dettaglio di ogni valore sono consultabili con "Review". ACWR C.E = media <b>pesata</b> tra le ACWR di EEE, Drel, D&gt;15,9 e Acc/Dec (stessi pesi del TPI/GPI — D&gt;15,9 conta meno delle altre). ACWR C.I = ACWR sull'SRPE (Carico Interno). Presenze = sedute GPS del giocatore sulle sedute GPS totali della squadra (tutte le sedute registrate quella settimana, anche individuali) — i giorni di infortunio del giocatore non vengono conteggiati né a favore né contro di lui, calcolate separatamente per la settimana corrente e per quella precedente.
+        TPI = media <b>pesata</b> della variazione % su 7 metriche di allenamento (distanza, Drel, tempo, N. Acc, N. Dec, Vel.max, DistV&gt;20 km/h — peso maggiore su distanza/Drel/tempo, minore su velocità/DistV&gt;20). GPI = stesso principio ma su tutti i 14 dati GPS della partita (peso maggiore a distanza/EEE/Drel, minore a D&gt;15,9/sprint/zone alte). Rispettivamente ultima settimana o ultima partita con dati, contro la media delle 3 precedenti — bianco entro ±10% (nessuna variazione rilevante), giallo oltre +10% (attenzione: un aumento non è automaticamente positivo), rosso sotto -10%. Il numero di metriche effettivamente usate e il dettaglio di ogni valore sono consultabili con "Review". ACWR C.E = media <b>pesata</b> tra le ACWR di EEE, Drel, D&gt;15,9 e Acc/Dec (D&gt;15,9 conta meno delle altre). ACWR C.I = ACWR sull'SRPE (Carico Interno). Presenze = sedute GPS del giocatore sulle sedute GPS totali della squadra (tutte le sedute registrate quella settimana, anche individuali) — i giorni di infortunio del giocatore non vengono conteggiati né a favore né contro di lui, calcolate separatamente per la settimana corrente e per quella precedente.
       </div>
     </div>
   );
